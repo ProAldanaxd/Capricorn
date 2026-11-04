@@ -1,0 +1,14 @@
+{
+  "ciudad": "Guadalajara",
+  "latitud": 20.6597,
+  "longitud": -103.3496,
+  "zonaHoraria": "America/Mexico_City",
+  "clima": true,
+  "reaccionarAApps": true,
+  "esconderseEnJuegos": true,
+  "minutosParaRecordarDescanso": 120,
+  "minutosAFKParaDormir": 5,
+  "avisos": true,
+  "atajoPedirleAlgo": "Ctrl+Alt+C",
+  "desbloquearAccionesPeligrosas": false
+}

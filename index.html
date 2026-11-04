@@ -23,13 +23,34 @@
       display: block; color: #27f59b; font-size: 10px; letter-spacing: 2px; margin-bottom: 2px;
       text-shadow: 0 0 6px #27f59b;
     }
+    /* cuadro para pedirle cosas */
+    #ask {
+      position: fixed; left: 0; top: 0; width: 300px; display: none;
+      padding: 8px 10px 10px; background: rgba(14, 6, 26, 0.96);
+      border: 1px solid #27f59b; box-shadow: 0 0 16px rgba(39, 245, 155, 0.45), 4px 4px 0 #6a2bff;
+      font: 13px Consolas, 'Cascadia Mono', monospace; color: #ffe3ee;
+    }
+    #ask.show { display: block; }
+    #ask .tag { display: block; color: #ff2a6d; font-size: 10px; letter-spacing: 2px; margin-bottom: 5px; text-shadow: 0 0 6px #ff2a6d; }
+    #ask input {
+      width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #6a2bff; outline: none;
+      background: #07030f; color: #ffffff; font: inherit; caret-color: #27f59b; user-select: text;
+    }
+    #ask input:focus { border-color: #27f59b; }
+    #ask .hint { margin-top: 5px; font-size: 10px; color: #b98fc9; }
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
   <div id="bubble"><span class="tag">CAPRI://</span><span id="bubble-text"></span></div>
+  <div id="ask"><span class="tag">PEDIRLE ALGO A CAPRI://</span>
+    <input id="ask-input" type="text" spellcheck="false" autocomplete="off" placeholder="ej. abre cyberpunk, pausa, busca tarea…">
+    <div class="hint">Enter para enviar · Esc para cerrar · escribe "ayuda"</div>
+  </div>
   <script src="lines.js"></script>
   <script src="assets/atlas_hd.js"></script>
   <script src="renderer.js"></script>
+  <script src="env.js"></script>
+  <script src="commands.js"></script>
 </body>
 </html>

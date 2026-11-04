@@ -135,6 +135,7 @@ function headWorld() {
   return { x: pet.x, y: baseY() - curFrame.ay * S * 0.55 };
 }
 function hit(px, py) {
+  if (pet.mode === 'hidden') return false; // escondida (p. ej. mientras juegas): no atrapa clics
   const f = curFrame;
   const half = Math.max(f.ax, f.w - f.ax) * S * 0.75;
   const top = baseY() - f.ay * S * 0.95;
@@ -252,7 +253,7 @@ let dragVx = 0, dragVy = 0, clickTimer = null;
 let ignoring = true;
 
 function updateIgnore() {
-  const want = !(down || hit(cur.x, cur.y));
+  const want = !(down || hit(cur.x, cur.y) || (window.uiHit && window.uiHit(cur.x, cur.y)));
   if (want !== ignoring) { ignoring = want; api.setIgnore(want); }
 }
 
@@ -368,6 +369,7 @@ function steer(tx, ty, maxSp, dt) {
 function update(dt) {
   T += dt; pet.modeT += dt;
   const m = pet.mode;
+  if (m === 'hidden') { pet.alpha = 0; parts.length = 0; updateBubble(); updateIgnore(); return; }
 
   // --- percepción del cursor ---
   const hw = headWorld();
@@ -725,12 +727,14 @@ function demoStep() {
 }
 
 let last = performance.now();
+let hiddenFrames = 0;
 function frame(ts) {
   const dt = Math.min(0.05, (ts - last) / 1000);
   last = ts;
   if (DEMO) { demoStep(); nextDecision = T + 99; if (pet.mode === 'walk' || pet.mode === 'float') pet.x = W / 2; }
   update(dt);
-  render();
+  if (pet.mode !== 'hidden' || hiddenFrames++ < 2) render(); // escondida: no gasta GPU
+  if (pet.mode !== 'hidden') hiddenFrames = 0;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

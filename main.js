@@ -1,8 +1,23 @@
 ﻿// Capri - mascota de escritorio (fan-made)
 // Ventana transparente del tamaño del área de trabajo, siempre encima y que deja
 // pasar los clics excepto cuando el cursor está sobre Capri.
-const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, powerMonitor, globalShortcut } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const apps = require('./apps');
+const powers = require('./powers');
+
+// ---------- configuración (config.json, editable a mano) ----------
+const DEFAULT_CONFIG = {
+  ciudad: 'Guadalajara', latitud: 20.6597, longitud: -103.3496, zonaHoraria: 'America/Mexico_City',
+  clima: true, reaccionarAApps: true, esconderseEnJuegos: true, minutosParaRecordarDescanso: 120, minutosAFKParaDormir: 5,
+  avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', desbloquearAccionesPeligrosas: false,
+};
+let config = DEFAULT_CONFIG;
+try { config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) }; } catch { /* usa valores por defecto */ }
+
+// Último estado conocido de cada fuente, para mandarlo cuando la ventana termina de cargar.
+const env = { app: null, weather: null };
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -20,10 +35,12 @@ function buildMenu() {
   return Menu.buildFromTemplate([
     { label: 'Capri', enabled: false },
     { type: 'separator' },
+    { label: 'Pedirle algo…', accelerator: config.atajoPedirleAlgo, click: () => send('ask') },
     { label: 'Hablar', click: () => send('talk') },
     { label: 'Bailar', click: () => send('dance') },
     { label: 'Mirar el cielo', click: () => send('sky') },
     { label: 'Teletransportarse', click: () => send('teleport') },
+    { label: '¿Qué clima hace?', enabled: config.clima, click: () => send('weather') },
     { label: 'Seguir mi cursor', type: 'checkbox', checked: state.following, click: () => send('follow') },
     { label: state.sleeping ? 'Despertar' : 'Dormir', click: () => send(state.sleeping ? 'wake' : 'sleep') },
     {
@@ -100,9 +117,71 @@ function createWindow() {
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setIgnoreMouseEvents(true, { forward: true });
-  win.loadFile('index.html', process.env.CAPRI_DEMO ? { query: { demo: process.env.CAPRI_DEMO } } : undefined);
+  const query = {};
+  if (process.env.CAPRI_DEMO) query.demo = process.env.CAPRI_DEMO;
+  if (process.env.CAPRI_ENVTEST) query.envtest = '1';
+  if (process.env.CAPRI_CMDTEST) query.cmdtest = process.env.CAPRI_CMDTEST;
+  win.loadFile('index.html', Object.keys(query).length ? { query } : undefined);
   win.webContents.on('did-finish-load', sendFloor);
+  if (process.env.CAPRI_DEBUG) {
+    win.webContents.on('console-message', (e) => console.log('[renderer]', e.level, e.message));
+  }
   ipcMain.on('get-floor', sendFloor);
+  ipcMain.on('get-env', () => {
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('config', config);
+    if (env.app) win.webContents.send('app', env.app);
+    if (env.weather) win.webContents.send('weather', env.weather);
+  });
+
+  // ---------- poderes: el cuadro de órdenes y los avisos ----------
+  ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, { config, win, games: () => apps.loadedGames() }));
+  ipcMain.on('focus-input', (_e, on) => {
+    if (!win || win.isDestroyed()) return;
+    win.setFocusable(!!on);
+    if (on) { win.focus(); win.webContents.focus(); }
+    else { win.blur(); }
+  });
+  if (config.avisos) powers.startMonitors(config, (kind, data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('notify', kind, data);
+  });
+
+  // App en primer plano (incluye juegos de Steam/Epic)
+  if (!config.reaccionarAApps) apps.loadGames();
+  if (config.reaccionarAApps) {
+    const watcher = apps.startWatcher(__dirname, (info) => {
+      env.app = info;
+      if (win && !win.isDestroyed()) win.webContents.send('app', info);
+    });
+    app.on('before-quit', () => watcher.stop());
+  }
+
+  // Tiempo sin tocar mouse/teclado (para AFK y recordatorios de descanso)
+  setInterval(() => {
+    if (win && !win.isDestroyed()) win.webContents.send('idle', powerMonitor.getSystemIdleTime());
+  }, 5000);
+
+  // Clima (Open-Meteo: gratis, sin clave; solo se manda la latitud/longitud de config.json)
+  if (config.clima) {
+    const fetchWeather = async () => {
+      try {
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + config.latitud + '&longitude=' + config.longitud +
+          '&current=temperature_2m,apparent_temperature,weather_code,is_day,precipitation,wind_speed_10m' +
+          '&timezone=' + encodeURIComponent(config.zonaHoraria);
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const c = (await r.json()).current;
+        env.weather = { temp: c.temperature_2m, feels: c.apparent_temperature, code: c.weather_code, isDay: !!c.is_day,
+          precip: c.precipitation, wind: c.wind_speed_10m, city: config.ciudad, at: Date.now() };
+        if (process.env.CAPRI_DEBUG) console.log('[clima]', JSON.stringify(env.weather));
+        if (win && !win.isDestroyed()) win.webContents.send('weather', env.weather);
+        setTimeout(fetchWeather, 30 * 60 * 1000);
+      } catch {
+        setTimeout(fetchWeather, 10 * 60 * 1000); // sin internet: reintenta en 10 min
+      }
+    };
+    setTimeout(fetchWeather, 4000);
+  }
 
   // Posición global del cursor (funciona aunque el mouse esté sobre otras apps).
   setInterval(() => {
@@ -147,7 +226,10 @@ app.whenReady().then(() => {
   tray.setToolTip('Capri');
   tray.setContextMenu(buildMenu());
   tray.on('click', () => send('talk'));
+  // Atajo global para pedirle algo desde cualquier app
+  try { globalShortcut.register(config.atajoPedirleAlgo, () => send('ask')); } catch { /* atajo inválido u ocupado */ }
 });
 
 app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
