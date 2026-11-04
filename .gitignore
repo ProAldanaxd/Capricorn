@@ -1,0 +1,22 @@
+# Dependencias (se reinstalan con `npm install`)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Vistas previas y diagnósticos generados
+vista_previa/
+
+# Capturas de la serie usadas solo como referencia (tienen derechos de autor; la app no las usa)
+assets/capri_src.jpg
+assets/ref_cara.png
+assets/capri.png
+tools_cut.py
+tools_faces.py
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
+*.log

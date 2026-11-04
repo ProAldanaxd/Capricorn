@@ -1,0 +1,14 @@
+{
+  "name": "capricorn",
+  "version": "1.0.0",
+  "description": "Capricorn: mascota virtual de escritorio para Windows (fan-made, inspirada en Capri de Cyberpunk: Edgerunners 2)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "demo": "set CAPRI_DEMO=1&& electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.2.2"
+  }
+}

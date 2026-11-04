@@ -1,0 +1,6 @@
+# Solo para las herramientas que regeneran los sprites (tools_slice.py, tools_enhance.py).
+# La mascota en sí no necesita Python.
+numpy
+pillow
+scipy
+opencv-python
