@@ -7,22 +7,39 @@
   <style>
     html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; user-select: none; cursor: default; }
     canvas { position: fixed; left: 0; top: 0; }
+    /* ===== globo de Capri (panel con retrato) ===== */
     #bubble {
-      position: fixed; left: 0; top: 0;
-      max-width: 250px; padding: 7px 12px 9px;
-      background: rgba(14, 6, 26, 0.93);
-      border: 1px solid #ff2a6d;
-      box-shadow: 0 0 14px rgba(255, 42, 109, 0.5), inset 0 0 12px rgba(39, 245, 155, 0.1), 4px 4px 0 #6a2bff;
-      color: #ffe3ee;
-      font: 13px/1.4 Consolas, 'Cascadia Mono', monospace;
-      opacity: 0; transition: opacity .25s;
-      pointer-events: none; white-space: pre-wrap;
+      --panel: #160f1e; --edge: #7b3cff; --edge2: #4b1fa8; --tail-x: 60px;
+      position: fixed; left: 0; top: 0; width: 330px;
+      opacity: 0; transition: opacity .2s; pointer-events: none;
+      font-family: Bahnschrift, 'Segoe UI', sans-serif; color: #f4eefc;
+      filter: drop-shadow(0 6px 12px rgba(0,0,0,.45));
     }
     #bubble.show { opacity: 1; }
-    #bubble .tag {
-      display: block; color: #27f59b; font-size: 10px; letter-spacing: 2px; margin-bottom: 2px;
-      text-shadow: 0 0 6px #27f59b;
-    }
+    #bubble .slab, #bubble .panel { clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+    #bubble .slab { position: absolute; inset: 0; transform: translate(7px, 7px); background: linear-gradient(135deg, var(--edge), var(--edge2)); }
+    #bubble .panel { position: relative; display: flex; gap: 13px; padding: 13px 15px 15px 13px; background: var(--panel); box-shadow: inset 0 0 0 1.5px rgba(123,60,255,.55); }
+    #bubble .tail, #bubble .tail-slab { position: absolute; width: 26px; height: 16px; clip-path: polygon(0 0, 100% 0, 30% 100%); }
+    #bubble .tail { left: var(--tail-x); bottom: -15px; background: var(--panel); }
+    #bubble .tail-slab { left: calc(var(--tail-x) + 4px); bottom: -22px; background: var(--edge); }
+    #bubble.side .tail, #bubble.side .tail-slab { display: none; }
+    #bubble .avatar { flex: 0 0 auto; width: 68px; height: 68px; padding: 3px; box-sizing: border-box; background: var(--edge);
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+    #bubble .avatar img { width: 100%; height: 100%; object-fit: cover; display: block;
+      clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+    #bubble .body { flex: 1; min-width: 0; }
+    #bubble .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    #bubble .name { font-size: 11px; letter-spacing: 4px; color: #b7a9cc; font-weight: 600; }
+    #bubble .badge { font-size: 10px; letter-spacing: 2px; padding: 3px 7px 3px 9px; color: #d8c8ff; background: rgba(123,60,255,.28);
+      box-shadow: inset 0 0 0 1px rgba(160,110,255,.7); clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+    #bubble .badge.local { color: #b9ffe0; background: rgba(39,245,155,.14); box-shadow: inset 0 0 0 1px rgba(39,245,155,.6); }
+    #bubble.thinking .badge { animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .4; } }
+    #bubble .msg { font-size: 17px; line-height: 1.3; white-space: pre-wrap; word-wrap: break-word; min-height: 22px; }
+    #bubble.thinking .msg::after { content: '• • •'; letter-spacing: 3px; animation: dots 1.2s infinite; }
+    @keyframes dots { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+    #bubble .page { font-size: 10px; letter-spacing: 2px; color: #b7a9cc; text-align: right; margin-top: 4px; }
+    #bubble .page:empty { display: none; }
     /* cuadro para pedirle cosas */
     #ask {
       position: fixed; left: 0; top: 0; width: 300px; display: none;
@@ -42,10 +59,21 @@
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <div id="bubble"><span class="tag">CAPRI://</span><span id="bubble-text"></span></div>
-  <div id="ask"><span class="tag">PEDIRLE ALGO A CAPRI://</span>
+  <div id="bubble">
+    <div class="slab"></div>
+    <div class="panel">
+      <div class="avatar"><img id="bubble-avatar" src="assets/avatar_capri.png" alt=""></div>
+      <div class="body">
+        <div class="head"><span class="name">CAPRI</span><span id="bubble-badge" class="badge local">LOCAL</span></div>
+        <div id="bubble-text" class="msg"></div>
+        <div id="bubble-page" class="page"></div>
+      </div>
+    </div>
+    <div class="tail-slab"></div><div class="tail"></div>
+  </div>
+  <div id="ask"><span class="tag" id="ask-tag">PEDIRLE ALGO A CAPRI://</span>
     <input id="ask-input" type="text" spellcheck="false" autocomplete="off">
-    <div class="hint">Enter para enviar · Esc para cerrar · escribe "ayuda"</div>
+    <div class="hint" id="ask-hint">Enter para enviar · Esc para cerrar</div>
   </div>
   <script src="lines.js"></script>
   <script src="assets/atlas_hd.js"></script>

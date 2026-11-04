@@ -15,22 +15,35 @@
   // ---------------------------------------------------------------- cuadro de texto
   const box = document.getElementById('ask');
   const input = document.getElementById('ask-input');
-  let open = false;
+  const boxTag = document.getElementById('ask-tag');
+  const boxHint = document.getElementById('ask-hint');
+  let open = false, boxMode = 'ask';
 
+  // El cuadro va ARRIBA del globo (sin encimarse). Si arriba no cabe, va debajo del globo.
   function placeBox() {
     const bw = box.offsetWidth || 300, bh = box.offsetHeight || 70;
-    const top0 = baseY() - curFrame.ay * S;
-    let left = clamp(pet.x - bw / 2, 8, W - bw - 8);
-    let top = top0 - bh - 70;
-    if (top < 8) {
-      top = clamp(baseY() - curFrame.ay * S * 0.5 - bh / 2, 8, H - bh - 8);
-      left = pet.x + 140 * S + bw < W ? pet.x + 140 * S : pet.x - 140 * S - bw;
+    const GAP = 14;
+    let r;
+    if (bubbleEl.classList.contains('show')) r = bubbleEl.getBoundingClientRect();
+    else {
+      // dónde quedaría el globo (misma cuenta que updateBubble)
+      const gbw = bubbleEl.offsetWidth || 330, gbh = Math.max(bubbleEl.offsetHeight, 100);
+      const gl = clamp(pet.x - gbw / 2 + 60, 8, W - gbw - 8), gt = baseY() - curFrame.ay * S - gbh - 20;
+      r = { left: gl, top: gt, right: gl + gbw, bottom: gt + gbh };
     }
+    let left = clamp(r.left, 8, W - bw - 8);
+    let top = r.top - bh - GAP;
+    if (top < 8) top = clamp(r.bottom + GAP + 8, 8, H - bh - 8); // sin espacio arriba: debajo del globo
     box.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }
-  function showBox() {
+  function showBox(mode = 'ask') {
     if (pet.mode === 'hidden') { pet.x = clamp(pet.x, margin(), W - margin()); pet.y = floorY(); setMode('tpIn', 0.5); }
     if (pet.mode === 'sleep') wake();
+    boxMode = mode;
+    const isKey = mode === 'key';
+    boxTag.textContent = isKey ? 'API KEY DE GEMINI://' : 'PEDIRLE ALGO A CAPRI://';
+    boxHint.textContent = isKey ? 'Pégala y Enter · se guarda cifrada · vacío = borrar · Esc cancela' : 'Enter para enviar · Esc para cerrar';
+    input.type = isKey ? 'password' : 'text';
     open = true;
     box.classList.add('show');
     input.value = '';
@@ -39,7 +52,7 @@
     setTimeout(() => input.focus(), 60);
     if (INTERRUPTIBLE.has(pet.mode) || pet.mode === 'float') setMode('look', 999);
     nextDecision = T + 999;
-    say(R(P.ask), 2);
+    say(isKey ? 'Pásame la clave de Google AI Studio. No se la digo a nadie.' : R(P.ask), 2);
   }
   function hideBox() {
     if (!open) return;
@@ -60,12 +73,100 @@
     if (e.key === 'Escape') { hideBox(); return; }
     if (e.key === 'Enter') {
       const text = input.value.trim();
+      const mode = boxMode;
+      input.value = '';
       hideBox();
-      if (text) handle(text);
+      if (mode === 'key') submitKey(text);
+      else if (text) handle(text);
     }
   });
   input.addEventListener('blur', () => setTimeout(() => { if (open && document.activeElement !== input) hideBox(); }, 150));
-  api.onAction((a) => { if (a === 'ask') (open ? hideBox() : showBox()); });
+  api.onAction((a) => {
+    if (a === 'ask') (open ? hideBox() : showBox('ask'));
+    else if (a === 'apikey') showBox('key');
+    else if (a === 'ai-on') say(aiInfo.hasKey ? 'IA activada. Mis engramas están en línea.' : 'IA activada, pero me falta la API key. Clic derecho → Poner API key…', 3.5);
+    else if (a === 'ai-off') say('IA apagada. Vuelvo a mis frases de siempre.', 2.5);
+    else if (a === 'ai-reset') say('Listo, olvidé esta conversación. Lo de mi memoria sigue ahí.', 3);
+  });
+
+  async function submitKey(k) {
+    think(true);
+    const r = await api.ai.setKey(k);
+    think(false);
+    if (r.ok && r.removed) say('Borré la clave. Ahora soy solo yo, sin nube.', 3);
+    else if (r.ok) { doJump(); say('¡Conectada! Ahora sí puedo pensar de verdad.', 3); }
+    else if (r.reason === 'invalid') { pet.glitch = 1; say('Esa clave no funcionó. Revísala en Google AI Studio.', 3.5); }
+    else if (r.reason === 'network') say('No pude probarla. ¿Hay internet?', 3);
+    else if (r.reason === 'noencrypt') say('Windows no me deja cifrar la clave aquí, así que no la guardé.', 3.5);
+    else say('Algo falló guardando la clave (' + (r.status || r.reason) + ').', 3);
+    refreshAi();
+  }
+
+  // ---------------------------------------------------------------- estado de la IA
+  let aiInfo = { enabled: false, hasKey: false, comentarios: true, gapSec: 150 };
+  let aiDownUntil = 0; // sin internet / sin cuota: modo LOCAL un rato
+  const aiReady = () => aiInfo.enabled && aiInfo.hasKey && T > aiDownUntil;
+  const refreshBadge = () => setBubbleBadge(aiReady() ? 'SYNC' : 'LOCAL');
+  async function refreshAi() { try { aiInfo = { ...aiInfo, ...(await api.ai.status()) }; } catch { /* sin main */ } refreshBadge(); }
+  api.ai.onState((s) => { aiInfo = { ...aiInfo, ...s }; refreshBadge(); });
+  setInterval(refreshBadge, 5000);
+  refreshAi();
+
+  const APP_NAMES = { operagx: 'Opera GX', browser: 'un navegador', vscode: 'VS Code', antigravity: 'Antigravity', claude: 'la app de Claude',
+    steam: 'Steam', epic: 'Epic Games', discord: 'Discord', explorer: 'el Explorador de archivos', outlook: 'Outlook',
+    settings: 'Configuración de Windows', taskmgr: 'el Administrador de tareas', desktop: 'el escritorio' };
+  window.capriAppName = (a) => (a ? (a.id === 'game' ? a.game : APP_NAMES[a.id] || null) : null);
+  // contexto que se le pasa a la IA en cada mensaje
+  function aiContext() {
+    const st = (window.capriEnv && window.capriEnv.state()) || {};
+    const SKY = { clear: 'despejado', cloudy: 'nublado', fog: 'con neblina', rain: 'lloviendo', storm: 'con tormenta', snow: 'nevando' };
+    return {
+      weather: st.weather ? { city: st.weather.city, temp: st.weather.temp, sky: SKY[st.wcat] || '' } : null,
+      app: window.capriAppName(st.curApp), game: st.inGame || null,
+      battery: batt ? { pct: Math.round(batt.level * 100), charging: batt.charging } : null,
+      activeMin: st.activeSec ? Math.round(st.activeSec / 60) : 0,
+    };
+  }
+  function aiFailed(res) {
+    console.warn('IA falló:', res.error, res.status || '', res.detail || '');
+    if (res.error === 'network' || res.error === 'timeout') aiDownUntil = T + 120;
+    else if (res.error === 'quota') { aiDownUntil = T + 300; }
+    refreshBadge();
+  }
+
+  // gestos que pide la IA
+  api.ai.onExpress((a) => {
+    if (pet.mode === 'hidden' || pet.mode === 'drag') return;
+    if (a === 'dance') setMode('dance', 4.5);
+    else if (a === 'jump') doJump();
+    else if (a === 'wave') setMode('wave', 1.8);
+    else if (a === 'sky') setMode('sky', 3.5);
+    else if (a === 'teleport') startTeleport();
+    else if (a === 'spin') { setMode('spin', 0.9); burst(15); }
+    else if (a === 'glitch') { pet.glitch = 1; burst(20); }
+    else if (a === 'sleep') startSleep();
+    else if (a === 'sit') { if (onFloor()) startSit(); else goTo({ x: pet.x, y: floorY() }, startSit); }
+  });
+
+  // ---------------------------------------------------------------- comentarios espontáneos con IA
+  // speak(descripción del evento para la IA, frase fija de respaldo, opciones) -> true si va a hablar
+  let lastSpontAi = -1e9, spontBusy = false;
+  window.capriSpeak = function (desc, fallback, { hold = 3.2, maxWait = 8, force = false } = {}) {
+    const useAi = aiReady() && aiInfo.comentarios && !spontBusy && (force || T - lastSpontAi >= (aiInfo.gapSec || 150));
+    if (!useAi) { if (fallback) say(fallback, hold); return !!fallback; }
+    spontBusy = true; lastSpontAi = T;
+    let done = false;
+    const giveUp = setTimeout(() => { if (!done) { done = true; spontBusy = false; if (fallback) say(fallback, hold); } }, maxWait * 1000);
+    api.ai.ask('event', desc, aiContext()).then((res) => {
+      spontBusy = false;
+      if (done) return;
+      done = true; clearTimeout(giveUp);
+      if (pet.mode === 'hidden') return;
+      if (res.ok) say(res.text, hold + 0.8, { queue: true });
+      else { aiFailed(res); if (fallback) say(fallback, hold); }
+    }).catch(() => { spontBusy = false; if (!done) { done = true; clearTimeout(giveUp); if (fallback) say(fallback, hold); } });
+    return true;
+  };
 
   // ---------------------------------------------------------------- intérprete
   // Verbo al inicio de la frase -> lo que sigue es el "objeto" (ej. "abre el cyberpunk" -> "cyberpunk")
@@ -87,7 +188,31 @@
   }
   const media = (key, times = 1) => { cmd('media', { key, times }); reply(R(P.media[key]), 1.8); };
 
+  // Todo pasa primero por la IA; si está apagada o falla, por las reglas de siempre.
+  let aiErrorToldAt = -1e9;
   async function handle(raw) {
+    lastInteract = Date.now();
+    if (aiReady()) {
+      think(true);
+      if (INTERRUPTIBLE.has(pet.mode)) setMode('look', 30);
+      const res = await api.ai.ask('chat', raw, aiContext());
+      think(false);
+      if (pet.mode === 'look') setMode('idle');
+      if (res.ok) { say(res.text, 3.8); return; }
+      aiFailed(res);
+      // avisar del problema (sin repetirlo a cada rato) y seguir con las reglas
+      if (T - aiErrorToldAt > 600) {
+        aiErrorToldAt = T;
+        const why = { quota: 'Se acabó mi cuota de IA por ahora', key: 'Mi API key no funciona (revísala en el menú)', network: 'No tengo internet',
+          timeout: 'La IA tardó demasiado', nokey: 'Me falta la API key' }[res.error] || 'La IA falló';
+        say(why + '. Uso mis reglas mientras.', 3);
+        await new Promise((r) => setTimeout(r, 2600));
+      }
+    }
+    return handleRules(raw);
+  }
+
+  async function handleRules(raw) {
     const t = norm(raw);
     lastInteract = Date.now();
     const num = (t.match(/\d+/) || [])[0];
@@ -201,7 +326,15 @@
     if (T - (lastNotice.get(k) ?? -1e9) < cooldown) return;
     lastNotice.set(k, T);
     if (pet.mode === 'sleep' && kind !== 'batteryCritical') return;
-    reply(R(AV[kind], vars), hold);
+    const DESC = {
+      cpu: `El CPU de la compu lleva un rato al ${vars.pct}%.`, ram: `La RAM está al ${vars.pct}%.`,
+      disk: `Solo quedan ${vars.freeGB} GB libres en el disco C:.`, download: `Acaba de terminar una descarga: "${vars.name}" (${vars.mb} MB).`,
+      usb: `El usuario conectó una unidad USB (${vars.letter}:).`, usbOut: `El usuario desconectó la unidad ${vars.letter}:.`,
+      batteryLow: `La batería bajó al ${vars.pct}% y no está cargando.`, batteryCritical: `¡La batería está en ${vars.pct}%! Urge conectar el cargador.`,
+      plugged: 'El usuario conectó el cargador.', unplugged: 'El usuario desconectó el cargador.',
+    };
+    const urgent = kind === 'batteryCritical' || kind === 'download';
+    window.capriSpeak(DESC[kind] || kind, R(AV[kind], vars), { hold, force: urgent, maxWait: urgent ? 5 : 8 });
     if (kind === 'cpu' || kind === 'ram' || kind === 'batteryCritical') pet.glitch = 1;
     if ((kind === 'usb' || kind === 'download') && INTERRUPTIBLE.has(pet.mode)) doJump();
   }
@@ -233,12 +366,14 @@
   })();
 
   // ---------------------------------------------------------------- pruebas
-  window.capriCmd = { handle, showBox, hideBox };
+  window.capriCmd = { handle, handleRules, showBox, hideBox, aiReady: () => aiReady() };
   const test = new URLSearchParams(location.search).get('cmdtest');
   if (test) {
     test.split('|').forEach((c, i) => setTimeout(async () => {
       console.log('CMD>', c);
       if (c === '__box') { showBox(); input.value = 'abre cyberpunk'; return; }
+      if (c.startsWith('__key:')) { await submitKey(c.slice(6)); setTimeout(() => console.log('SAID>', bub.text), 300); return; }
+      if (c === '__long') { say('Esta es una respuesta larga de prueba para ver cómo se parte el globo. Tiene varias frases seguidas. Así puedes leer cada parte con calma. Y aquí termina la tercera parte del mensaje, choom.', 3); return; }
       await handle(c);
       setTimeout(() => console.log('SAID>', bub.text), 300);
     }, 3000 + i * 3500));

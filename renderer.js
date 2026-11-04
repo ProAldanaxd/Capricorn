@@ -144,34 +144,94 @@ function hit(px, py) {
 }
 
 // ---------- globo de texto ----------
-const bub = { text: '', start: 0, until: 0, active: false };
+// Globo estilo panel: retrato, "CAPRI", etiqueta SYNC/LOCAL, texto letra por letra,
+// puntitos mientras la IA piensa y respuestas largas partidas en "1 / 2", "2 / 2"...
+const bubbleBadge = document.getElementById('bubble-badge');
+// retrato: el de tu foto si existe (solo local), si no el del spritesheet
+const bubbleAvatar = document.getElementById('bubble-avatar');
+const avatarFallback = () => { if (!bubbleAvatar.src.endsWith('avatar_sprite.png')) bubbleAvatar.src = 'assets/avatar_sprite.png'; };
+bubbleAvatar.addEventListener('error', avatarFallback);
+if (bubbleAvatar.complete && !bubbleAvatar.naturalWidth) avatarFallback();
+const bubblePage = document.getElementById('bubble-page');
+const bub = { text: '', start: 0, until: 0, active: false, thinking: false };
+let bubQueue = [];
 const GLYPHS = '01#$%&@<>/\\|=+*';
-function say(text, hold = 2.8) {
-  if (!text) return;
-  bub.text = text; bub.start = T; bub.active = true;
-  bub.until = T + text.length * 0.03 + hold;
-  talkUntil = T + text.length * 0.03 + 0.3;
+function setBubbleBadge(b) {
+  bubbleBadge.textContent = b;
+  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : '');
+}
+function splitText(text, max = 150) {
+  const t = String(text).replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return [t];
+  const out = [];
+  let cur = '';
+  const push = () => { if (cur.trim()) out.push(cur.trim()); cur = ''; };
+  for (const sent of t.split(/(?<=[.!?…])\s+/)) {
+    if ((cur + ' ' + sent).trim().length <= max) { cur = (cur + ' ' + sent).trim(); continue; }
+    push();
+    if (sent.length <= max) { cur = sent; continue; }
+    for (const w of sent.split(' ')) { if ((cur + ' ' + w).trim().length > max) push(); cur = (cur + ' ' + w).trim(); }
+  }
+  push();
+  return out;
+}
+function showBubbleItem(it) {
+  bub.thinking = false;
+  bub.text = it.text; bub.start = T; bub.active = true;
+  bub.until = T + it.text.length * 0.03 + it.hold;
+  talkUntil = T + it.text.length * 0.03 + 0.3;
+  bubblePage.textContent = it.page;
+  bubbleEl.classList.remove('thinking');
   bubbleEl.classList.add('show');
+}
+// opts.queue: si ya hay un globo, se forma detrás en lugar de reemplazarlo
+function say(text, hold = 2.8, opts = {}) {
+  if (!text) return;
+  const chunks = splitText(text);
+  const items = chunks.map((c, i) => ({ text: c, hold: i < chunks.length - 1 ? 1.8 : hold, page: chunks.length > 1 ? `${i + 1} / ${chunks.length}` : '' }));
+  if (opts.queue && bub.active && !bub.thinking) { bubQueue.push(...items); return; }
+  bubQueue = items.slice(1);
+  showBubbleItem(items[0]);
+}
+// puntitos de "pensando" mientras responde la IA
+function think(on) {
+  if (on) {
+    bub.thinking = true; bub.active = true; bub.text = ''; bub.until = T + 60; bubQueue = [];
+    bubbleText.textContent = ''; bubblePage.textContent = '';
+    bubbleEl.classList.add('show', 'thinking');
+  } else if (bub.thinking) {
+    bub.thinking = false; bub.active = false;
+    bubbleEl.classList.remove('show', 'thinking');
+  }
 }
 function updateBubble() {
   if (!bub.active) return;
-  const n = Math.floor((T - bub.start) / 0.03);
-  let s = bub.text.slice(0, n);
-  const rest = Math.min(3, bub.text.length - n);
-  for (let i = 0; i < rest; i++) s += GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-  if (bubbleText.textContent !== s) bubbleText.textContent = s;
+  if (!bub.thinking) {
+    const n = Math.floor((T - bub.start) / 0.03);
+    let s = bub.text.slice(0, n);
+    const rest = Math.min(3, bub.text.length - n);
+    for (let i = 0; i < rest; i++) s += GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+    if (bubbleText.textContent !== s) bubbleText.textContent = s;
+  }
   const bw = bubbleEl.offsetWidth, bh = bubbleEl.offsetHeight;
   const top0 = baseY() - curFrame.ay * S;
-  let left = clamp(pet.x - bw / 2, 8, W - bw - 8);
-  let top = top0 - bh - 4;
+  let left = clamp(pet.x - bw / 2 + 60, 8, W - bw - 8);
+  let top = top0 - bh - 20;
+  let side = false;
   if (top < 8) {
     const hw = headWorld();
     top = clamp(hw.y - bh / 2, 8, H - bh - 8);
     const off = EXT.side * S * 0.7;
     left = pet.x + off + bw < W ? pet.x + off : pet.x - off - bw;
+    side = true;
   }
+  bubbleEl.classList.toggle('side', side);
+  bubbleEl.style.setProperty('--tail-x', Math.round(clamp(pet.x - left - 13, 22, bw - 48)) + 'px');
   bubbleEl.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
-  if (T > bub.until) { bub.active = false; bubbleEl.classList.remove('show'); }
+  if (T > bub.until) {
+    if (bubQueue.length) showBubbleItem(bubQueue.shift());
+    else { bub.active = false; bub.thinking = false; bubbleEl.classList.remove('show', 'thinking'); }
+  }
 }
 
 // ---------- partículas ----------
@@ -329,7 +389,12 @@ function onClick() {
   if (chance(0.25)) { doJump(); say(line('pet')); return; }
   if (pet.mode !== 'sit') setMode('talk', 3.5);
   pet.glitch = Math.max(pet.glitch, 0.35);
-  say(line(isNight() && chance(0.3) ? 'night' : 'click'), 3.2);
+  const fixed = line(isNight() && chance(0.3) ? 'night' : 'click');
+  // con IA: un comentario nuevo (máx. uno cada 8 s por clics); sin IA: frase fija
+  if (window.capriSpeak && T - (onClick.lastAi || -1e9) > 8) {
+    onClick.lastAi = T;
+    window.capriSpeak('El usuario te dio clic para llamar tu atención. Dile algo espontáneo (puede ser sobre lo que está haciendo, la hora o algo que recuerdes de él).', fixed, { force: true, hold: 3.2, maxWait: 6 });
+  } else say(fixed, 3.2);
 }
 
 api.onAction((a) => {

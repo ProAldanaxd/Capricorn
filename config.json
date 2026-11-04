@@ -10,5 +10,10 @@
   "minutosAFKParaDormir": 5,
   "avisos": true,
   "atajoPedirleAlgo": "Ctrl+Alt+C",
-  "desbloquearAccionesPeligrosas": false
+  "desbloquearAccionesPeligrosas": false,
+  "ia": true,
+  "modeloIA": "gemini-3.6-flash",
+  "comentariosIA": true,
+  "segundosEntreComentariosIA": 150,
+  "desbloquearComandos": false
 }

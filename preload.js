@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld('capri', {
   cmd: (action, arg) => ipcRenderer.invoke('cmd', action, arg),
   focusInput: (on) => ipcRenderer.send('focus-input', on),
   onNotify: (cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
+  // IA (Gemini): la clave y las llamadas viven en el proceso principal
+  ai: {
+    ask: (kind, text, ctx) => ipcRenderer.invoke('ai-ask', kind, text, ctx),
+    status: () => ipcRenderer.invoke('ai-status'),
+    setKey: (k) => ipcRenderer.invoke('ai-setkey', k),
+    onState: (cb) => ipcRenderer.on('ai-state', (_e, s) => cb(s)),
+    onExpress: (cb) => ipcRenderer.on('express', (_e, a) => cb(a)),
+  },
   setIgnore: (v) => ipcRenderer.send('set-ignore', v),
   showMenu: (s) => ipcRenderer.send('show-menu', s),
   sendState: (s) => ipcRenderer.send('state', s),

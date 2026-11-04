@@ -1,20 +1,29 @@
 ﻿// Capri - mascota de escritorio (fan-made)
 // Ventana transparente del tamaño del área de trabajo, siempre encima y que deja
 // pasar los clics excepto cuando el cursor está sobre Capri.
-const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, powerMonitor, globalShortcut } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, powerMonitor, globalShortcut, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const apps = require('./apps');
 const powers = require('./powers');
+const ai = require('./ai');
 
 // ---------- configuración (config.json, editable a mano) ----------
 const DEFAULT_CONFIG = {
   ciudad: 'Guadalajara', latitud: 20.6597, longitud: -103.3496, zonaHoraria: 'America/Mexico_City',
   clima: true, reaccionarAApps: true, esconderseEnJuegos: true, minutosParaRecordarDescanso: 120, minutosAFKParaDormir: 5,
   avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', desbloquearAccionesPeligrosas: false,
+  ia: true, modeloIA: 'gemini-3.6-flash', comentariosIA: true, segundosEntreComentariosIA: 150, desbloquearComandos: false,
 };
 let config = DEFAULT_CONFIG;
 try { config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) }; } catch { /* usa valores por defecto */ }
+let aiState = null; // { enabled } — se carga cuando la app está lista (necesita userData)
+const aiInfo = () => ({ enabled: !!(aiState && aiState.enabled), hasKey: ai.hasKey(), comentarios: config.comentariosIA !== false,
+  gapSec: config.segundosEntreComentariosIA });
+function pushAiState() {
+  if (win && !win.isDestroyed()) win.webContents.send('ai-state', aiInfo());
+  if (tray) tray.setContextMenu(buildMenu());
+}
 
 // Último estado conocido de cada fuente, para mandarlo cuando la ventana termina de cargar.
 const env = { app: null, weather: null };
@@ -36,6 +45,15 @@ function buildMenu() {
     { label: 'Capri', enabled: false },
     { type: 'separator' },
     { label: 'Pedirle algo…', accelerator: config.atajoPedirleAlgo, click: () => send('ask') },
+    { type: 'separator' },
+    {
+      label: 'IA activada', type: 'checkbox', checked: !!(aiState && aiState.enabled),
+      click: () => { aiState.enabled = !aiState.enabled; ai.saveState(aiState); pushAiState(); send(aiState.enabled ? 'ai-on' : 'ai-off'); },
+    },
+    { label: ai.hasKey() ? 'Cambiar API key…' : 'Poner API key…', click: () => send('apikey') },
+    { label: 'Ver lo que recuerda', click: () => shell.openPath(ai.ensureMemoryFile()) },
+    { label: 'Olvidar esta conversación', click: () => { ai.resetChat(); send('ai-reset'); } },
+    { type: 'separator' },
     { label: 'Hablar', click: () => send('talk') },
     { label: 'Bailar', click: () => send('dance') },
     { label: 'Mirar el cielo', click: () => send('sky') },
@@ -130,12 +148,25 @@ function createWindow() {
   ipcMain.on('get-env', () => {
     if (!win || win.isDestroyed()) return;
     win.webContents.send('config', config);
+    win.webContents.send('ai-state', aiInfo());
     if (env.app) win.webContents.send('app', env.app);
     if (env.weather) win.webContents.send('weather', env.weather);
   });
 
   // ---------- poderes: el cuadro de órdenes y los avisos ----------
-  ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, { config, win, games: () => apps.loadedGames() }));
+  const powersCtx = () => ({ config, win, games: () => apps.loadedGames() });
+  ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, powersCtx()));
+
+  // ---------- IA (Gemini) ----------
+  ipcMain.handle('ai-status', () => aiInfo());
+  ipcMain.handle('ai-setkey', async (_e, key) => { const r = await ai.setKey(key); pushAiState(); return r; });
+  ipcMain.handle('ai-ask', async (_e, kind, text, ctx) => {
+    if (!aiState.enabled) return { ok: false, error: 'off' };
+    return ai.ask(kind, text, ctx, {
+      config, powersCtx,
+      express: (a) => { if (win && !win.isDestroyed()) win.webContents.send('express', a); },
+    });
+  });
   ipcMain.on('focus-input', (_e, on) => {
     if (!win || win.isDestroyed()) return;
     win.setFocusable(!!on);
@@ -221,6 +252,7 @@ ipcMain.on('state', (_e, s) => {
 });
 
 app.whenReady().then(() => {
+  aiState = ai.loadState(config);
   createWindow();
   tray = new Tray(trayIcon());
   tray.setToolTip('Capri');

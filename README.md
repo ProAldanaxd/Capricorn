@@ -33,6 +33,37 @@ tu cursor y te habla cuando interactúas con ella.
 La detección de apps es local: solo se lee el nombre del programa en primer plano y nada sale
 de tu compu. Lo único que usa internet es el clima (se envía la latitud/longitud de `config.json`).
 
+## IA (Gemini)
+
+Capri puede pensar con **Gemini** (Google AI Studio). Con la IA activa:
+
+- **Platica de verdad** y entiende cualquier forma de pedirle las cosas.
+- **Usa sus poderes como herramientas** (abrir apps, música, buscar, capturas, ordenar Descargas...).
+- **Comenta lo que pasa** (apps, juegos, clima, hora, batería...) con frases generadas, no fijas.
+- **Recuerda cosas de ti** a largo plazo (memoria local, una cosa por línea).
+
+Configúrala desde el clic derecho:
+
+| Opción | Qué hace |
+|---|---|
+| **IA activada** | Prende/apaga la IA (se recuerda entre sesiones) |
+| **Poner API key…** | Pegas tu clave de [Google AI Studio](https://aistudio.google.com/apikey). Se guarda **cifrada** con Windows en la carpeta de datos de la app; nunca en el proyecto |
+| **Ver lo que recuerda** | Abre su memoria (un `.txt` que puedes editar) |
+| **Olvidar esta conversación** | Borra el historial de la plática actual (no la memoria) |
+
+En el globo, la etiqueta **SYNC** significa que está usando la IA; **LOCAL**, que está con sus reglas y frases
+fijas (IA apagada, sin clave, sin internet o sin cuota).
+
+**Qué se envía a Google:** lo que le escribes, su memoria, el contexto (hora, clima, app abierta, batería) y los
+resultados de las herramientas que use. En el plan gratuito de AI Studio, Google puede usar esos datos para
+mejorar sus productos.
+
+### Ejecutar comandos 🔒
+
+La IA puede **proponer** comandos de PowerShell, pero viene bloqueado: pon `"desbloquearComandos": true` en
+`config.json`. Aun así, **cada comando** se muestra completo en una ventana y solo corre si le das *Ejecutar*
+(sin administrador, máximo 30 s). Todo queda registrado en `comandos.log` en la carpeta de datos de la app.
+
 ## Pedirle cosas
 
 Presiona **`Ctrl + Alt + C`** (o clic derecho → *Pedirle algo…*) y escribe lo que quieres:
@@ -76,6 +107,11 @@ Edita [`config.json`](config.json) y reinicia Capri:
 | `avisos` | `false` para apagar los avisos de batería, CPU, disco, descargas y USB |
 | `atajoPedirleAlgo` | Atajo de teclado para pedirle cosas (por defecto `Ctrl+Alt+C`) |
 | `desbloquearAccionesPeligrosas` | `true` para permitir papelera, tema/brillo e instalar (siempre con confirmación) |
+| `ia` | Si la IA arranca activada la primera vez (luego manda el menú) |
+| `modeloIA` | Modelo de Gemini (por defecto `gemini-3.6-flash`; si no existe usa `gemini-flash-latest`) |
+| `comentariosIA` | `false` para que los comentarios espontáneos sean frases fijas |
+| `segundosEntreComentariosIA` | Mínimo de segundos entre comentarios espontáneos con IA (por defecto 150) |
+| `desbloquearComandos` | `true` para que la IA pueda proponer comandos (siempre con confirmación) |
 
 ## Requisitos
 
@@ -133,6 +169,7 @@ apps.js          Detecta la app en primer plano y los juegos instalados (Steam/E
 watcher.ps1      Pequeño script que reporta la ventana activa a apps.js.
 commands.js      Cuadro "Pedirle algo", intérprete de órdenes y avisos.
 powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloqueadas) y los avisos.
+ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
 config.json      Ciudad y opciones.
 index.html       Página que carga todo.
 assets/
