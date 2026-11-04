@@ -14,12 +14,35 @@ const DEFAULT_CONFIG = {
   clima: true, reaccionarAApps: true, esconderseEnJuegos: true, minutosParaRecordarDescanso: 120, minutosAFKParaDormir: 5,
   avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', desbloquearAccionesPeligrosas: false,
   ia: true, modeloIA: 'gemini-3.6-flash', comentariosIA: true, segundosEntreComentariosIA: 150, desbloquearComandos: false,
+  ollama: true, modeloOllama: 'llama3.2:3b', segundosEntreComentariosOllama: 60,
 };
 let config = DEFAULT_CONFIG;
 try { config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) }; } catch { /* usa valores por defecto */ }
-let aiState = null; // { enabled } — se carga cuando la app está lista (necesita userData)
-const aiInfo = () => ({ enabled: !!(aiState && aiState.enabled), hasKey: ai.hasKey(), comentarios: config.comentariosIA !== false,
-  gapSec: config.segundosEntreComentariosIA });
+let aiState = null; // { ollama, modeloOllama, routes } — se carga cuando la app está lista (necesita userData)
+let ollamaOnline = false;
+let ollamaModelList = [];
+// ¿el proveedor está configurado y conectado? (la cuota la revisa ai.js)
+const available = (p) => (p === 'gemini' ? ai.hasKey() : p === 'ollama' ? !!(aiState && aiState.ollama && ollamaOnline) : false);
+const aiInfo = () => {
+  const st = ai.status();
+  return {
+    routes: aiState ? aiState.routes : { comentarios: 'none', platica: 'none', herramientas: 'none' },
+    avail: { gemini: available('gemini') && !st.down.gemini, ollama: available('ollama') && !st.down.ollama },
+    hasKey: ai.hasKey(), comentarios: config.comentariosIA !== false,
+    gapSec: config.segundosEntreComentariosIA, gapOllama: config.segundosEntreComentariosOllama,
+  };
+};
+async function setOllama(on) {
+  aiState.ollama = on; ai.saveState(aiState);
+  if (on) { ollamaOnline = await ai.startOllama(); if (ollamaOnline) ollamaModelList = await ai.ollamaModels(); }
+  else { ai.stopOllama(); ollamaOnline = false; }
+  pushAiState();
+  return ollamaOnline;
+}
+function setRoute(job, p) {
+  aiState.routes[job] = p; ai.saveState(aiState); pushAiState();
+  send('route:' + job + ':' + p);
+}
 function pushAiState() {
   if (win && !win.isDestroyed()) win.webContents.send('ai-state', aiInfo());
   if (tray) tray.setContextMenu(buildMenu());
@@ -34,10 +57,54 @@ if (!app.requestSingleInstanceLock()) {
 
 let win = null;
 let tray = null;
-let state = { following: false, sleeping: false, scale: 0.75 };
+let state = { following: false, sleeping: false, scale: 0.75, moving: true };
 
 function send(action) {
   if (win && !win.isDestroyed()) win.webContents.send('action', action);
+}
+
+// ---------- menú "API Keys": arriba las conexiones, abajo qué IA hace cada trabajo ----------
+// Para un proveedor nuevo: su "Configurar …" arriba y una entrada en PROVIDER_LABELS.
+const PROVIDER_LABELS = { gemini: 'Gemini', ollama: 'Ollama' };
+function apiKeysMenu() {
+  if (!aiState) return { label: 'API Keys', enabled: false };
+  const note = (p) => (p === 'gemini' && !ai.hasKey() ? ' (sin API key)' : p === 'ollama' && !aiState.ollama ? ' (apagado)'
+    : p === 'ollama' && !ollamaOnline ? ' (sin conexión)' : '');
+  const job = (key, label, extra = {}, noneLabel = 'Ninguna') => ({
+    label,
+    submenu: [
+      ...Object.keys(PROVIDER_LABELS).map((p) => ({
+        label: PROVIDER_LABELS[p] + (extra[p] || '') + note(p), type: 'radio', checked: aiState.routes[key] === p, click: () => setRoute(key, p),
+      })),
+      { label: noneLabel, type: 'radio', checked: aiState.routes[key] === 'none', click: () => setRoute(key, 'none') },
+    ],
+  });
+  const models = ollamaModelList.length ? ollamaModelList : [aiState.modeloOllama];
+  return {
+    label: 'API Keys',
+    submenu: [
+      { label: (ai.hasKey() ? 'Cambiar' : 'Configurar') + ' API key de Gemini…', click: () => send('apikey') },
+      {
+        label: 'Configurar Ollama',
+        submenu: [
+          {
+            label: 'Encendido' + (aiState.ollama && !ollamaOnline ? ' (sin conexión)' : ''), type: 'checkbox', checked: !!aiState.ollama,
+            click: async () => { const on = !aiState.ollama; const up = await setOllama(on); send(on ? (up ? 'ollama-on' : 'ollama-fail') : 'ollama-off'); },
+          },
+          {
+            label: 'Modelo', enabled: !!aiState.ollama,
+            submenu: models.map((m) => ({ label: m, type: 'radio', checked: m === aiState.modeloOllama,
+              click: () => { aiState.modeloOllama = m; ai.saveState(aiState); pushAiState(); send('ollama-model:' + m); } })),
+          },
+        ],
+      },
+      { type: 'separator' },
+      { label: 'Qué hace cada IA', enabled: false },
+      job('comentarios', 'Comentarios espontáneos', {}, 'Ninguna (frases fijas)'),
+      job('platica', 'Plática', { gemini: ' (con búsqueda en internet)' }),
+      job('herramientas', 'Herramientas', { ollama: ' (experimental)' }, 'Ninguna (solo reglas)'),
+    ],
+  };
 }
 
 function buildMenu() {
@@ -46,21 +113,28 @@ function buildMenu() {
     { type: 'separator' },
     { label: 'Pedirle algo…', accelerator: config.atajoPedirleAlgo, click: () => send('ask') },
     { type: 'separator' },
+    apiKeysMenu(),
     {
-      label: 'IA activada', type: 'checkbox', checked: !!(aiState && aiState.enabled),
-      click: () => { aiState.enabled = !aiState.enabled; ai.saveState(aiState); pushAiState(); send(aiState.enabled ? 'ai-on' : 'ai-off'); },
+      label: 'Memoria',
+      submenu: [
+        { label: 'Ver lo que recuerda', click: () => shell.openPath(ai.ensureMemoryFile()) },
+        { label: 'Olvidar esta conversación', click: () => { ai.resetChat(); send('ai-reset'); } },
+      ],
     },
-    { label: ai.hasKey() ? 'Cambiar API key…' : 'Poner API key…', click: () => send('apikey') },
-    { label: 'Ver lo que recuerda', click: () => shell.openPath(ai.ensureMemoryFile()) },
-    { label: 'Olvidar esta conversación', click: () => { ai.resetChat(); send('ai-reset'); } },
     { type: 'separator' },
-    { label: 'Hablar', click: () => send('talk') },
-    { label: 'Bailar', click: () => send('dance') },
-    { label: 'Mirar el cielo', click: () => send('sky') },
-    { label: 'Teletransportarse', click: () => send('teleport') },
-    { label: '¿Qué clima hace?', enabled: config.clima, click: () => send('weather') },
+    { label: 'Moverse por la pantalla', type: 'checkbox', checked: state.moving !== false, click: () => send('move-toggle') },
     { label: 'Seguir mi cursor', type: 'checkbox', checked: state.following, click: () => send('follow') },
-    { label: state.sleeping ? 'Despertar' : 'Dormir', click: () => send(state.sleeping ? 'wake' : 'sleep') },
+    {
+      label: 'Acciones',
+      submenu: [
+        { label: 'Hablar', click: () => send('talk') },
+        { label: 'Bailar', click: () => send('dance') },
+        { label: 'Mirar el cielo', click: () => send('sky') },
+        { label: 'Teletransportarse', click: () => send('teleport') },
+        { label: '¿Qué clima hace?', enabled: config.clima, click: () => send('weather') },
+        { label: state.sleeping ? 'Despertar' : 'Dormir', click: () => send(state.sleeping ? 'wake' : 'sleep') },
+      ],
+    },
     {
       label: 'Tamaño',
       submenu: [['Pequeña', 0.55], ['Normal', 0.75], ['Grande', 1.0]].map(([label, v]) => ({
@@ -157,16 +231,31 @@ function createWindow() {
   const powersCtx = () => ({ config, win, games: () => apps.loadedGames() });
   ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, powersCtx()));
 
-  // ---------- IA (Gemini) ----------
+  // ---------- IA: proveedores y trabajos ----------
   ipcMain.handle('ai-status', () => aiInfo());
   ipcMain.handle('ai-setkey', async (_e, key) => { const r = await ai.setKey(key); pushAiState(); return r; });
   ipcMain.handle('ai-ask', async (_e, kind, text, ctx) => {
-    if (!aiState.enabled) return { ok: false, error: 'off' };
-    return ai.ask(kind, text, ctx, {
-      config, powersCtx,
+    const aenv = {
+      config, state: aiState, available, powersCtx,
       express: (a) => { if (win && !win.isDestroyed()) win.webContents.send('express', a); },
-    });
+    };
+    const r = kind === 'event' ? await ai.event(text, ctx, aenv) : await ai.chat(text, ctx, aenv);
+    if (!r.ok && r.provider === 'ollama' && (r.error === 'network' || r.error === 'timeout')) ollamaOnline = await ai.ollamaUp(); // ¿se cayó?
+    pushAiState();
+    return r;
   });
+  ipcMain.on('ollama-unload', () => { if (aiState.ollama && ollamaOnline) ai.unloadOllama(aiState.modeloOllama); });
+
+  // Ollama: encenderlo si está activado, y revisar cada minuto si sigue vivo
+  if (aiState.ollama) ai.startOllama().then(async (up) => { ollamaOnline = up; if (up) ollamaModelList = await ai.ollamaModels(); pushAiState(); });
+  win.webContents.on('did-finish-load', () => setTimeout(pushAiState, 500)); // la ventana tarda en cargar
+  setInterval(async () => {
+    pushAiState(); // refresca si un proveedor salió de su pausa por cuota
+    if (!aiState.ollama) return;
+    const up = await ai.ollamaUp();
+    if (up !== ollamaOnline) { ollamaOnline = up; if (up) ollamaModelList = await ai.ollamaModels(); pushAiState(); }
+  }, 60000);
+  app.on('before-quit', () => ai.stopOllama());
   ipcMain.on('focus-input', (_e, on) => {
     if (!win || win.isDestroyed()) return;
     win.setFocusable(!!on);

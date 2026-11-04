@@ -75,6 +75,8 @@
         if (inGame !== name || pet.mode === 'drag') return;
         setMode('tpOut', 0.4);
         setTimeout(() => { if (inGame === name) { setMode('hidden'); pet.alpha = 0; } }, 450);
+        // que Ollama suelte la tarjeta de video para el juego
+        setTimeout(() => { if (inGame === name && api.ai && api.ai.unloadOllama) api.ai.unloadOllama(); }, 6000);
       }, 3200);
     }
   }
@@ -121,8 +123,9 @@
     if (!afk && sec >= afkLimit && pet.mode !== 'hidden') {
       afk = true;
       afkSince = T;
-      if (pet.mode !== 'sleep') {
-        startSleep();
+      if (pet.mode === 'sleep') pet.modeDur = Infinity; // ya dormía: que siga hasta que vuelvas
+      else {
+        startSleep(Infinity); // AFK: duerme hasta que regreses (sentada, caminando o volando)
         setTimeout(() => envSay(pickFrom('afkSleep', LINES.afkSleep), { force: true, hold: 2.5,
           desc: `El usuario lleva ${CFG.minutosAFKParaDormir} minutos sin tocar la compu. Te vas a dormir; dilo en una frase.` }), 50);
       }
@@ -245,7 +248,7 @@
   api.onEnv({
     config: (c) => { CFG = { ...CFG, ...c }; },
     app: onApp,
-    idle: onIdle,
+    idle: (s) => { if (!window.__fakeIdle) onIdle(s); }, // en pruebas se ignora la actividad real
     weather: onWeather,
   });
   function weatherReport() {

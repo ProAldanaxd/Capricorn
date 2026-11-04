@@ -84,9 +84,21 @@
   api.onAction((a) => {
     if (a === 'ask') (open ? hideBox() : showBox('ask'));
     else if (a === 'apikey') showBox('key');
-    else if (a === 'ai-on') say(aiInfo.hasKey ? 'IA activada. Mis engramas están en línea.' : 'IA activada, pero me falta la API key. Clic derecho → Poner API key…', 3.5);
-    else if (a === 'ai-off') say('IA apagada. Vuelvo a mis frases de siempre.', 2.5);
     else if (a === 'ai-reset') say('Listo, olvidé esta conversación. Lo de mi memoria sigue ahí.', 3);
+    else if (a === 'ollama-on') say('Ollama en línea. Mi cerebro local está despierto.', 3, { badge: 'OLLAMA' });
+    else if (a === 'ollama-off') say('Apagué Ollama. Lo que le tocaba lo hace la otra IA o mis frases.', 3.5);
+    else if (a === 'ollama-fail') say('No pude encender Ollama. ¿Está instalado? Sigo sin él.', 3.5);
+    else if (a.startsWith('ollama-model:')) say('Ahora pienso con ' + a.slice(13) + '.', 2.5, { badge: 'OLLAMA' });
+    else if (a.startsWith('route:')) {
+      const [, job, p] = a.split(':');
+      const JOB = { comentarios: 'Mis comentarios', platica: 'La plática', herramientas: 'Las herramientas' };
+      const WHO = { gemini: 'van con Gemini', ollama: 'van con Ollama', none: job === 'herramientas' ? 'van con mis reglas' : 'van con mis frases fijas' };
+      let extra = '';
+      if (p === 'gemini' && !aiInfo.hasKey) extra = ' Ojo: me falta la API key de Gemini.';
+      if (p === 'ollama' && !aiInfo.avail.ollama) extra = ' Ojo: Ollama está apagado o sin conexión.';
+      if (job === 'herramientas' && p === 'ollama') extra += ' Con Ollama puedo equivocarme de herramienta.';
+      say(JOB[job] + ' ' + WHO[p] + '.' + extra, 4, { badge: BADGE[p] });
+    }
   });
 
   async function submitKey(k) {
@@ -103,10 +115,26 @@
   }
 
   // ---------------------------------------------------------------- estado de la IA
-  let aiInfo = { enabled: false, hasKey: false, comentarios: true, gapSec: 150 };
-  let aiDownUntil = 0; // sin internet / sin cuota: modo LOCAL un rato
-  const aiReady = () => aiInfo.enabled && aiInfo.hasKey && T > aiDownUntil;
-  const refreshBadge = () => setBubbleBadge(aiReady() ? 'SYNC' : 'LOCAL');
+  // routes: qué IA hace cada trabajo ('gemini' | 'ollama' | 'none'); avail: qué IA está lista ahora
+  let aiInfo = { routes: { comentarios: 'none', platica: 'none', herramientas: 'none' }, avail: { gemini: false, ollama: false },
+    hasKey: false, comentarios: true, gapSec: 150, gapOllama: 60 };
+  const BADGE = { gemini: 'SYNC', ollama: 'OLLAMA', none: 'LOCAL' };
+  const ready = (p) => p !== 'none' && !!aiInfo.avail[p];
+  const anyReady = () => ready('gemini') || ready('ollama');
+  // ¿la IA puede atender un mensaje? (la elegida o la otra como respaldo)
+  const chatPossible = () => {
+    const { platica, herramientas } = aiInfo.routes;
+    return platica !== 'none' ? anyReady() : ready(herramientas);
+  };
+  const aiReady = chatPossible;
+  // etiqueta del globo: SYNC = Gemini, OLLAMA = IA local, LOCAL = reglas y frases fijas
+  window.capriDefaultBadge = () => {
+    const p = aiInfo.routes.platica;
+    if (ready(p)) return BADGE[p];
+    if (p !== 'none' && anyReady()) return ready('gemini') ? 'SYNC' : 'OLLAMA';
+    return 'LOCAL';
+  };
+  const refreshBadge = () => { if (!bub.active || bub.thinking) setBubbleBadge(window.capriDefaultBadge()); };
   async function refreshAi() { try { aiInfo = { ...aiInfo, ...(await api.ai.status()) }; } catch { /* sin main */ } refreshBadge(); }
   api.ai.onState((s) => { aiInfo = { ...aiInfo, ...s }; refreshBadge(); });
   setInterval(refreshBadge, 5000);
@@ -127,11 +155,10 @@
       activeMin: st.activeSec ? Math.round(st.activeSec / 60) : 0,
     };
   }
+  // las pausas por cuota/red las lleva el proceso principal; aquí solo se actualiza el estado
   function aiFailed(res) {
-    console.warn('IA falló:', res.error, res.status || '', res.detail || '');
-    if (res.error === 'network' || res.error === 'timeout') aiDownUntil = T + 120;
-    else if (res.error === 'quota') { aiDownUntil = T + 300; }
-    refreshBadge();
+    console.warn('IA falló:', res.provider || '', res.error, res.status || '', res.detail || '');
+    refreshAi();
   }
 
   // gestos que pide la IA
@@ -152,8 +179,12 @@
   // speak(descripción del evento para la IA, frase fija de respaldo, opciones) -> true si va a hablar
   let lastSpontAi = -1e9, spontBusy = false;
   window.capriSpeak = function (desc, fallback, { hold = 3.2, maxWait = 8, force = false } = {}) {
-    const useAi = aiReady() && aiInfo.comentarios && !spontBusy && (force || T - lastSpontAi >= (aiInfo.gapSec || 150));
-    if (!useAi) { if (fallback) say(fallback, hold); return !!fallback; }
+    // con Ollama los comentarios son gratis: se permiten más seguido
+    const c = aiInfo.routes.comentarios;
+    const who = ready(c) ? c : ready('ollama') ? 'ollama' : 'gemini';
+    const gap = who === 'ollama' ? (aiInfo.gapOllama || 60) : (aiInfo.gapSec || 150);
+    const useAi = c !== 'none' && anyReady() && aiInfo.comentarios && !spontBusy && (force || T - lastSpontAi >= gap);
+    if (!useAi) { if (fallback) say(fallback, hold, { badge: 'LOCAL' }); return !!fallback; }
     spontBusy = true; lastSpontAi = T;
     let done = false;
     const giveUp = setTimeout(() => { if (!done) { done = true; spontBusy = false; if (fallback) say(fallback, hold); } }, maxWait * 1000);
@@ -162,8 +193,8 @@
       if (done) return;
       done = true; clearTimeout(giveUp);
       if (pet.mode === 'hidden') return;
-      if (res.ok) say(res.text, hold + 0.8, { queue: true });
-      else { aiFailed(res); if (fallback) say(fallback, hold); }
+      if (res.ok) say(res.text, hold + 0.8, { queue: true, badge: BADGE[res.provider] || 'SYNC' });
+      else { if (res.error !== 'off') aiFailed(res); if (fallback) say(fallback, hold, { badge: 'LOCAL' }); }
     }).catch(() => { spontBusy = false; if (!done) { done = true; clearTimeout(giveUp); if (fallback) say(fallback, hold); } });
     return true;
   };
@@ -188,28 +219,36 @@
   }
   const media = (key, times = 1) => { cmd('media', { key, times }); reply(R(P.media[key]), 1.8); };
 
-  // Todo pasa primero por la IA; si está apagada o falla, por las reglas de siempre.
+  // Lo que le escribes:
+  //  - Herramientas = Ninguna -> primero las reglas (abrir, música...); si no es orden, plática con IA.
+  //  - Si no -> la IA (con herramientas propias o delegadas); si falla, reglas.
   let aiErrorToldAt = -1e9;
+  async function askAi(raw) {
+    think(true);
+    if (INTERRUPTIBLE.has(pet.mode)) setMode('look', 30);
+    const res = await api.ai.ask('chat', raw, aiContext());
+    think(false);
+    if (pet.mode === 'look') setMode('idle');
+    if (res.ok) { say(res.text, 3.8, { badge: BADGE[res.provider] || 'SYNC' }); return true; }
+    aiFailed(res);
+    if (T - aiErrorToldAt > 600 && res.error !== 'off') { // avisar del problema, sin repetirlo a cada rato
+      aiErrorToldAt = T;
+      const why = { quota: 'Se acabó mi cuota de IA por ahora', key: 'Mi API key no funciona (revísala en el menú)', network: 'No tengo internet',
+        timeout: 'La IA tardó demasiado', nokey: 'Me falta la API key', nomodel: 'No encontré el modelo de IA', unavailable: 'Mi IA no está disponible' }[res.error] || 'La IA falló';
+      say(why + '. Uso mis reglas mientras.', 3, { badge: 'LOCAL' });
+      await new Promise((r) => setTimeout(r, 2600));
+    }
+    return false;
+  }
   async function handle(raw) {
     lastInteract = Date.now();
-    if (aiReady()) {
-      think(true);
-      if (INTERRUPTIBLE.has(pet.mode)) setMode('look', 30);
-      const res = await api.ai.ask('chat', raw, aiContext());
-      think(false);
-      if (pet.mode === 'look') setMode('idle');
-      if (res.ok) { say(res.text, 3.8); return; }
-      aiFailed(res);
-      // avisar del problema (sin repetirlo a cada rato) y seguir con las reglas
-      if (T - aiErrorToldAt > 600) {
-        aiErrorToldAt = T;
-        const why = { quota: 'Se acabó mi cuota de IA por ahora', key: 'Mi API key no funciona (revísala en el menú)', network: 'No tengo internet',
-          timeout: 'La IA tardó demasiado', nokey: 'Me falta la API key' }[res.error] || 'La IA falló';
-        say(why + '. Uso mis reglas mientras.', 3);
-        await new Promise((r) => setTimeout(r, 2600));
-      }
-    }
-    return handleRules(raw);
+    const rulesFirst = aiInfo.routes.herramientas === 'none';
+    if (!rulesFirst && chatPossible() && await askAi(raw)) return;
+    const r = await handleRules(raw);
+    if (r !== 'unknown') return;
+    if (rulesFirst && chatPossible() && await askAi(raw)) return;
+    pet.glitch = 0.4;
+    reply(R(P.unknown), 4);
   }
 
   async function handleRules(raw) {
@@ -313,8 +352,7 @@
     }
     if (has(t, 'clima|temperatura|llueve|llover') || /que tiempo hace/.test(t)) { window.capriEnv && window.capriEnv.weatherReport(); return; }
 
-    pet.glitch = 0.4;
-    reply(R(P.unknown), 4);
+    return 'unknown'; // no es una orden conocida: quien llamó decide (Ollama o "no entendí")
   }
 
   // ---------------------------------------------------------------- avisos
@@ -372,6 +410,17 @@
     test.split('|').forEach((c, i) => setTimeout(async () => {
       console.log('CMD>', c);
       if (c === '__box') { showBox(); input.value = 'abre cyberpunk'; return; }
+      if (c === '__still' || c === '__move') { setMovement(c === '__move'); console.log('MODE>', pet.mode, 'moving', movementOn); return; }
+      if (c.startsWith('__spont:')) {
+        const d = c.slice(8);
+        setTimeout(() => { window.capriSpeak(d, 'RESPALDO FIJO', { force: true, maxWait: 30 }); setTimeout(() => console.log('SAID>', bubbleBadge.textContent, bub.text), 25000); }, 4000);
+        return;
+      }
+      if (c.startsWith('__chat:')) { await handle(c.slice(7)); setTimeout(() => console.log('SAID>', bubbleBadge.textContent, bub.text), 300); return; }
+      if (c === '__ai') { console.log('AI>', JSON.stringify(aiInfo), 'badge', window.capriDefaultBadge()); return; }
+      if (c === '__afk') { window.__fakeIdle = true; window.capriEnv.idle(9999); return; }
+      if (c === '__back') { window.capriEnv.idle(0); window.__fakeIdle = false; return; }
+      if (c === '__state') { console.log('MODE>', pet.mode, 'moving', movementOn, 'onFloor', onFloor()); return; }
       if (c.startsWith('__key:')) { await submitKey(c.slice(6)); setTimeout(() => console.log('SAID>', bub.text), 300); return; }
       if (c === '__long') { say('Esta es una respuesta larga de prueba para ver cómo se parte el globo. Tiene varias frases seguidas. Así puedes leer cada parte con calma. Y aquí termina la tercera parte del mensaje, choom.', 3); return; }
       await handle(c);

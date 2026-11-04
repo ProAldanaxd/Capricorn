@@ -15,5 +15,11 @@
   "modeloIA": "gemini-3.6-flash",
   "comentariosIA": true,
   "segundosEntreComentariosIA": 150,
-  "desbloquearComandos": false
+  "desbloquearComandos": false,
+  "rutaComentarios": "ollama",
+  "rutaPlatica": "gemini",
+  "rutaHerramientas": "gemini",
+  "ollama": true,
+  "modeloOllama": "llama3.2:3b",
+  "segundosEntreComentariosOllama": 60
 }

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('capri', {
     setKey: (k) => ipcRenderer.invoke('ai-setkey', k),
     onState: (cb) => ipcRenderer.on('ai-state', (_e, s) => cb(s)),
     onExpress: (cb) => ipcRenderer.on('express', (_e, a) => cb(a)),
+    unloadOllama: () => ipcRenderer.send('ollama-unload'),
   },
   setIgnore: (v) => ipcRenderer.send('set-ignore', v),
   showMenu: (s) => ipcRenderer.send('show-menu', s),

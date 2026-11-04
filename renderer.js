@@ -115,7 +115,21 @@ let talkUntil = 0;
 let greetCD = 0, stareCD = 0, farFor = 0, stareT = 0, petAcc = 0, petCD = 0, microGlitchAt = 6;
 
 function setMode(m, dur = 0) { pet.mode = m; pet.modeT = 0; pet.modeDur = dur; }
-function sendState() { api.sendState({ following, sleeping: pet.mode === 'sleep', scale: S }); }
+// Movimiento: activado = como siempre; desactivado = se queda sentada en la barra de tareas
+let movementOn = localStorage.getItem('capri.move') !== '0';
+function sendState() { api.sendState({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }); }
+function settleSitting() {
+  if (pet.mode === 'sit' || pet.mode === 'hidden' || pet.mode === 'drag') return;
+  if (onFloor()) startSit();
+  else goTo({ x: pet.x, y: floorY() }, startSit);
+}
+function setMovement(on) {
+  movementOn = on;
+  localStorage.setItem('capri.move', on ? '1' : '0');
+  if (!on) { following = false; settleSitting(); }
+  else if (pet.mode === 'sit') { setMode('stretch', 1.2); nextDecision = T + rand(2, 4); }
+  sendState();
+}
 
 // ---------- cursor ----------
 const cur = { x: -9999, y: -9999, speed: 0, t: 0 };
@@ -158,7 +172,7 @@ let bubQueue = [];
 const GLYPHS = '01#$%&@<>/\\|=+*';
 function setBubbleBadge(b) {
   bubbleBadge.textContent = b;
-  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : '');
+  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : b === 'OLLAMA' ? ' ollama' : '');
 }
 function splitText(text, max = 150) {
   const t = String(text).replace(/\s+/g, ' ').trim();
@@ -181,6 +195,7 @@ function showBubbleItem(it) {
   bub.until = T + it.text.length * 0.03 + it.hold;
   talkUntil = T + it.text.length * 0.03 + 0.3;
   bubblePage.textContent = it.page;
+  setBubbleBadge(it.badge || 'LOCAL'); // sin etiqueta = frase fija
   bubbleEl.classList.remove('thinking');
   bubbleEl.classList.add('show');
 }
@@ -188,7 +203,8 @@ function showBubbleItem(it) {
 function say(text, hold = 2.8, opts = {}) {
   if (!text) return;
   const chunks = splitText(text);
-  const items = chunks.map((c, i) => ({ text: c, hold: i < chunks.length - 1 ? 1.8 : hold, page: chunks.length > 1 ? `${i + 1} / ${chunks.length}` : '' }));
+  const items = chunks.map((c, i) => ({ text: c, hold: i < chunks.length - 1 ? 1.8 : hold, page: chunks.length > 1 ? `${i + 1} / ${chunks.length}` : '',
+    badge: opts.badge }));
   if (opts.queue && bub.active && !bub.thinking) { bubQueue.push(...items); return; }
   bubQueue = items.slice(1);
   showBubbleItem(items[0]);
@@ -261,9 +277,10 @@ function randomPoint() {
 }
 function doGlitch(talk = true) { pet.glitch = 1; burst(25); if (talk && chance(0.35)) say(line('glitch')); }
 function startTeleport() { setMode('tpOut', 0.4); }
-function startSleep() {
-  if (!onFloor()) { goTo({ x: pet.x, y: floorY() }, startSleep); return; }
-  setMode('sleep', rand(40, 120)); say(line('sleep'), 2); sendState();
+// dur: segundos dormida (por defecto una siesta corta). Infinity = hasta que algo la despierte.
+function startSleep(dur) {
+  if (!onFloor()) { goTo({ x: pet.x, y: floorY() }, () => startSleep(dur)); return; }
+  setMode('sleep', dur || rand(40, 120)); say(line('sleep'), 2); sendState();
 }
 function wake() { setMode('stretch', 1.4); say(line('wake')); lastInteract = Date.now(); sendState(); }
 function doJump(dur = 0.8) { setMode('jump', dur); pet.hairPulse = 1; }
@@ -274,6 +291,7 @@ const INTERRUPTIBLE = new Set(['idle', 'look', 'sit', 'walk', 'talk']);
 
 function decide() {
   nextDecision = T + rand(3, 8);
+  if (!movementOn) { settleSitting(); return; }
   if (following) return;
   const idleSec = (Date.now() - lastInteract) / 1000;
   if (idleSec > 150 && chance(0.45)) return startSleep();
@@ -400,12 +418,17 @@ function onClick() {
 api.onAction((a) => {
   lastInteract = Date.now();
   if (a === 'talk') onClick();
+  else if (a === 'move-toggle') {
+    setMovement(!movementOn);
+    say(movementOn ? 'Libre otra vez. A explorar tu pantalla.' : 'Ok, me quedo aquí sentadita.', 2.5);
+  }
   else if (a === 'dance') { setMode('dance', 5); say(line('dance')); }
   else if (a === 'sky') { setMode('sky', 4); say(line('sky')); }
   else if (a === 'teleport') startTeleport();
   else if (a === 'sleep') startSleep();
   else if (a === 'wake') wake();
   else if (a === 'follow') {
+    if (!movementOn) { say('Estoy en modo quieta. Activa "Moverse por la pantalla" para seguirte.', 3); sendState(); return; }
     following = !following;
     if (following) { setMode('follow'); say(line('follow')); } else { setMode('idle'); say(line('unfollow')); }
     sendState();
@@ -491,6 +514,7 @@ function update(dt) {
   switch (m) {
     case 'idle': case 'look': case 'talk': case 'sky': case 'wave': case 'stretch': case 'dance': case 'jump':
       if (pet.modeDur && pet.modeT > pet.modeDur) { setMode('idle'); nextDecision = T + rand(2, 5); }
+      else if (m === 'idle' && !movementOn) settleSitting();
       else if (m === 'idle' && T > nextDecision) decide();
       if ((m === 'dance' || m === 'jump') && chance(dt * 10)) emit(pet.x + rand(-120, 120) * S, baseY() - rand(0, 40) * S, { col: C.green, vy: rand(-60, -10) });
       break;
@@ -563,7 +587,7 @@ function update(dt) {
         pet.sitIdx = pet.sitIdx !== 0 ? 0 : r < 0.4 ? 1 : r < 0.7 ? 2 : 3;
         pet.sitTimer = pet.sitIdx === 0 ? rand(2.5, 6) : rand(1.5, 3.5);
       }
-      if (pet.modeT > pet.modeDur) setMode('stretch', 1.2);
+      if (pet.modeT > pet.modeDur) { if (movementOn) setMode('stretch', 1.2); else pet.modeT = 0; } // quieta: se queda sentada
       break;
     case 'sleep':
       if (chance(dt * 1.4)) {

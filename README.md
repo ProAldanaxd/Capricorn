@@ -42,17 +42,22 @@ Capri puede pensar con **Gemini** (Google AI Studio). Con la IA activa:
 - **Comenta lo que pasa** (apps, juegos, clima, hora, batería...) con frases generadas, no fijas.
 - **Recuerda cosas de ti** a largo plazo (memoria local, una cosa por línea).
 
-Configúrala desde el clic derecho:
+Configúrala desde el clic derecho → **API Keys**:
 
 | Opción | Qué hace |
 |---|---|
-| **IA activada** | Prende/apaga la IA (se recuerda entre sesiones) |
-| **Poner API key…** | Pegas tu clave de [Google AI Studio](https://aistudio.google.com/apikey). Se guarda **cifrada** con Windows en la carpeta de datos de la app; nunca en el proyecto |
-| **Ver lo que recuerda** | Abre su memoria (un `.txt` que puedes editar) |
-| **Olvidar esta conversación** | Borra el historial de la plática actual (no la memoria) |
+| **Configurar API de Gemini…** | Pegas tu clave de [Google AI Studio](https://aistudio.google.com/apikey). Se guarda **cifrada** con Windows en la carpeta de datos de la app; nunca en el proyecto |
+| **IA activada (Gemini)** | Prende/apaga Gemini (se recuerda entre sesiones) |
+| **Ollama (IA local, gratis)** | Usa [Ollama](https://ollama.com) en tu compu para los comentarios espontáneos y como plática de respaldo. Capri lo enciende sola y le pide soltar la tarjeta de video cuando abres un juego |
 
-En el globo, la etiqueta **SYNC** significa que está usando la IA; **LOCAL**, que está con sus reglas y frases
-fijas (IA apagada, sin clave, sin internet o sin cuota).
+Y en **Memoria**: *Ver lo que recuerda* (un `.txt` editable) y *Olvidar esta conversación*.
+
+**Quién hace qué:**
+- Plática y herramientas (abrir, buscar, música...) → **Gemini**.
+- Comentarios espontáneos (apps, clima, clics...) → **Ollama** (gratis); si no está, Gemini.
+- Si Gemini se queda sin cuota → las órdenes las atienden sus reglas y la plática **Ollama**.
+
+En el globo: **SYNC** = Gemini, **OLLAMA** = IA local, **LOCAL** = reglas y frases fijas.
 
 **Qué se envía a Google:** lo que le escribes, su memoria, el contexto (hora, clima, app abierta, batería) y los
 resultados de las herramientas que use. En el plan gratuito de AI Studio, Google puede usar esos datos para
@@ -112,6 +117,9 @@ Edita [`config.json`](config.json) y reinicia Capri:
 | `comentariosIA` | `false` para que los comentarios espontáneos sean frases fijas |
 | `segundosEntreComentariosIA` | Mínimo de segundos entre comentarios espontáneos con IA (por defecto 150) |
 | `desbloquearComandos` | `true` para que la IA pueda proponer comandos (siempre con confirmación) |
+| `ollama` | Si Ollama arranca activado la primera vez (luego manda el menú) |
+| `modeloOllama` | Modelo local (por defecto `llama3.2:3b`) |
+| `segundosEntreComentariosOllama` | Mínimo de segundos entre comentarios con Ollama (por defecto 60) |
 
 ## Requisitos
 
