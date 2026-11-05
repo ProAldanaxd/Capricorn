@@ -19,17 +19,18 @@
   const boxTag = document.getElementById('ask-tag');
   const boxHint = document.getElementById('ask-hint');
   let open = false, boxMode = 'ask';
-  // a quién va lo que escribes: Capri, el chat de Claude o Claude Code (Tab cambia)
-  const DESTS = ['capri', 'chat', 'code'];
-  // chat y code van a la app de Claude, pero la barra los muestra como Capri (en naranja)
-  const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://' };
+  // a quién va lo que escribes: Capri, el chat de Claude, Claude Code o Antigravity (Tab cambia)
+  const DESTS = ['capri', 'chat', 'code', 'ag'];
+  // chat y code van a la app de Claude (naranja), ag a Antigravity (azul); todos se muestran como Capri
+  const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://', ag: 'CAPRI AG://' };
   let dest = 'capri';
   function setDest(d) {
     dest = d;
     if (boxMode !== 'ask') return;
     boxTag.textContent = DEST_TAG[d];
     boxHint.textContent = 'Enter para enviar · Tab cambia modo · Esc para cerrar';
-    box.classList.toggle('to-claude', d !== 'capri');
+    box.classList.toggle('to-claude', d === 'chat' || d === 'code');
+    box.classList.toggle('to-ag', d === 'ag');
   }
 
   // El cuadro va ARRIBA del globo (sin encimarse). Si arriba no cabe, va debajo del globo.
@@ -57,7 +58,7 @@
     boxTag.textContent = isKey ? 'API KEY DE GEMINI://' : 'CAPRI://';
     boxHint.textContent = isKey ? 'Pégala y Enter · se guarda cifrada · vacío = borrar · Esc cancela' : 'Enter para enviar · Esc para cerrar';
     input.type = isKey ? 'password' : 'text';
-    box.classList.remove('to-claude');
+    box.classList.remove('to-claude', 'to-ag');
     if (!isKey) setDest('capri');
     open = true;
     box.classList.add('show');
@@ -77,6 +78,7 @@
     box.classList.remove('show');
     input.blur();
     api.focusInput(false);
+    if (window.capriResyncIgnore) window.capriResyncIgnore(); // que la ventana vuelva a atrapar clics sobre Capri
     if (pet.mode === 'look') setMode('idle');
     nextDecision = T + rand(4, 8);
   }
@@ -107,6 +109,13 @@
   api.onAction((a) => {
     if (a === 'ask') (open ? hideBox() : showBox('ask'));
     else if (a === 'apikey') showBox('key');
+    else if (a === 'ag-reset') say('Va. Lo siguiente en CAPRI AG abre una conversación nueva.', 3, { badge: 'AG' });
+    else if (a.startsWith('ag-pick:')) say('Conectada a "' + a.slice(8) + '" en Antigravity. Lo que me pases en CAPRI AG va para allá.', 3.5, { badge: 'AG' });
+    else if (a === 'claude-reset:chat') say('Va. Lo siguiente que me pases abre un chat nuevo con Claude.', 3, { badge: 'CLAUDE' });
+    else if (a === 'claude-reset:code') say('Va. Lo siguiente en CAPRI CODE abre una sesión nueva.', 3, { badge: 'CLAUDE' });
+    else if (a.startsWith('claude-pick:')) say('Conectada a "' + a.slice(12) + '". Lo que me pases en CAPRI CODE va para allá.', 3.5, { badge: 'CLAUDE' });
+    else if (a === 'ventanas:on') say('Va: cuando le mande algo a una AI, minimizo su ventana.', 3, { badge: 'CLAUDE' });
+    else if (a === 'ventanas:off') say('Ok, dejo a la AI al frente después de enviarle algo.', 3, { badge: 'CLAUDE' });
     else if (a === 'ai-reset') say('Listo, olvidé esta conversación. Lo de mi memoria sigue ahí.', 3);
     else if (a === 'ollama-on') say('Ollama en línea. Mi cerebro local está despierto.', 3, { badge: 'OLLAMA' });
     else if (a === 'ollama-off') say('Apagué Ollama. Lo que le tocaba lo hace la otra IA o mis frases.', 3.5);
@@ -271,30 +280,64 @@
     if (m) return ['code', m[1]];
     m = s.match(/^@claude\b[\s:,]*([\s\S]+)$/i);
     if (m) return ['chat', m[1]];
+    m = s.match(/^@(?:ag|antigravity|agy)\b[\s:,]*([\s\S]+)$/i);
+    if (m) return ['ag', m[1]];
+    m = s.match(/^(?:dile|preg[uú]ntale|p[aá]sale|m[aá]ndale|p[ií]dele|escr[ií]bele)\s+a\s+antigravity\b[\s:,]*(?:que\s+)?([\s\S]+)$/i);
+    if (m) return ['ag', m[1]];
     m = s.match(/^(?:dile|preg[uú]ntale|p[aá]sale|m[aá]ndale|p[ií]dele|escr[ií]bele)\s+a\s+claude(\s+code)?\b[\s:,]*(?:que\s+)?([\s\S]+)$/i);
     if (m) return [m[1] ? 'code' : 'chat', m[2]];
     return null;
   }
   let claudeBusy = false;
+  // target: 'chat' | 'code' (app de Claude) | 'ag' (Antigravity)
   async function toClaude(target, text) {
     lastInteract = Date.now();
-    const name = target === 'code' ? 'Claude Code' : 'Claude';
+    const isAg = target === 'ag';
+    const name = isAg ? 'Antigravity' : target === 'code' ? 'Claude Code' : 'Claude';
+    const BG = isAg ? 'AG' : 'CLAUDE';
     if (claudeBusy) { reply('Espérame, todavía le estoy pasando lo anterior a ' + name + '.', 3); return; }
+    // "nuevo", "nuevo chat", "nueva sesión"... -> empezar otra conversación (con o sin texto)
+    // ("nuevo" solo, o "nuevo chat: ...", "otra sesión ..."; "otra pregunta" NO cuenta)
+    const fresh = String(text).match(/^(?:(?:nuev[oa]|otr[oa])\s+(?:chat|sesi[oó]n|conversaci[oó]n|pl[aá]tica)\b[\s:,.]*([\s\S]*)|nuev[oa][\s.!]*)$/i);
+    if (fresh) {
+      await api.claudeReset(target);
+      text = (fresh[1] || '').trim();
+      if (!text) {
+        const msg = isAg ? 'Va. Lo siguiente en CAPRI AG abre una conversación nueva.' : target === 'code' ? 'Va. Lo siguiente en CAPRI CODE abre una sesión nueva.' : 'Va. Lo siguiente que me pases abre un chat nuevo con Claude.';
+        say(msg, 3, { badge: BG, user: true }); return;
+      }
+    }
     claudeBusy = true;
     window.capriConvo.begin();
     try {
       pet.glitch = 0.35;
-      say(pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: 'CLAUDE', user: true });
-      const r = await api.claudeSend(target, text);
+      say(pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: BG, user: true });
+      const r = isAg ? await api.agSend(text) : await api.claudeSend(target, text);
       if (!r || !r.ok) {
-        reply(r && r.error === 'empty' ? 'No escribiste nada, choom.' : 'No pude abrir la app de Claude. ¿Está instalada?', 3.5);
+        const why = r && r.error === 'empty' ? 'No escribiste nada, choom.'
+          : r && r.error === 'notinstalled' ? 'No encontré Antigravity instalado en tu compu.'
+          : 'No pude abrir la app de ' + name + '. ¿Está instalada?';
+        reply(why, 3.5);
         return;
       }
-      if (r.result === 'sent') say(pick(['Listo, ya se lo mandé a ' + name + '.', 'Enviado. ' + name + ' ya está en eso.', 'Hecho, le di Enter por ti.']) + (r.truncated ? ' Era muy largo y lo recorté.' : ''), 3, { badge: 'CLAUDE', user: true });
-      else if (r.result === 'focused') say('Te lo dejé escrito en ' + name + '. Tú le das Enter.', 3, { badge: 'CLAUDE', user: true });
-      else if (r.result === 'nofocus') say(name + ' no se dejó traer al frente. Tu texto quedó escrito ahí; dale Enter tú.', 4, { badge: 'CLAUDE', user: true });
-      else if (r.result === 'dry') say('(prueba) ' + name + ' ← ' + text.slice(0, 60), 3, { badge: 'CLAUDE', user: true });
-      else say('Algo raro pasó con ' + name + '. Revisa si tu texto quedó ahí.', 3.5, { badge: 'CLAUDE', user: true });
+      // Antigravity siempre pega (igual que Claude al seguir en el mismo chat)
+      const pasted = isAg || r.mode === 'continue';
+      const where = r.pickFailed ? ' No encontré la conversación de antes; lo puse en la que estaba abierta.' : '';
+      if (pasted && r.result === 'nofocus') {
+        say(name + ' no se dejó traer al frente. Te dejé el texto copiado: pégalo tú con Ctrl+V.', 4, { badge: BG, user: true });
+        return;
+      }
+      if (r.mode === 'continue' && r.result === 'sent' && !r.minimized) {
+        say(pick(['Listo, seguí en la misma conversación.', 'Enviado, en el mismo hilo de antes.']) + (r.title ? ' (' + r.title + ')' : '') + where, 3, { badge: BG, user: true });
+        return;
+      }
+      if (r.result === 'sent' && r.minimized) say(pick(['Enviado. Te quité a ' + name + ' de encima; sigue trabajando abajo.', 'Listo, se lo mandé y minimicé su ventana.']) + (r.truncated ? ' Era muy largo y lo recorté.' : '') + where, 3, { badge: BG, user: true });
+      else if (r.result === 'sent') say(pick(['Listo, ya se lo mandé a ' + name + '.', 'Enviado. ' + name + ' ya está en eso.', 'Hecho, le di Enter por ti.']) + (r.truncated ? ' Era muy largo y lo recorté.' : '') + where, 3, { badge: BG, user: true });
+      else if (r.result === 'focused') say('Te lo dejé escrito en ' + name + '. Tú le das Enter.', 3, { badge: BG, user: true });
+      else if (r.result === 'nofocus') say(name + ' no se dejó traer al frente. Tu texto quedó escrito ahí; dale Enter tú.', 4, { badge: BG, user: true });
+      else if (r.result === 'noapp') say(name + ' no terminó de abrir. Intenta otra vez en un ratito.', 3.5, { badge: BG, user: true });
+      else if (r.result === 'dry') say('(prueba ' + (r.mode === 'continue' ? 'mismo chat' : 'nuevo') + ') ' + name + ' ← ' + text.slice(0, 60), 3, { badge: BG, user: true });
+      else say('Algo raro pasó con ' + name + '. Revisa si tu texto quedó ahí.', 3.5, { badge: BG, user: true });
     } finally {
       claudeBusy = false;
       window.capriConvo.end();
@@ -502,6 +545,15 @@
         setTimeout(() => clearInterval(log), 30000);
         return;
       }
+      if (c.startsWith('__menuclick:')) { // clic en un renglón del menú abierto
+        const it = [...document.querySelectorAll('.cm-item')].find((e) => e.textContent.includes(c.slice(12)));
+        if (it) it.click(); setTimeout(() => console.log('SAID>', bubbleBadge.textContent, bub.text), 600); return;
+      }
+      if (c.startsWith('__hover:')) { // pasar el mouse por un renglón (abre su submenú)
+        const it = [...document.querySelectorAll('.cm-item')].reverse().find((e) => e.textContent.includes(c.slice(8)));
+        if (it) it.dispatchEvent(new MouseEvent('mouseenter')); return;
+      }
+      if (c === '__menu0') { api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }, Math.round(pet.x - 120), Math.round(baseY() - 420)); return; }
       if (c === '__menu') {
         api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }, Math.round(pet.x - 120), Math.round(baseY() - 420));
         setTimeout(() => {

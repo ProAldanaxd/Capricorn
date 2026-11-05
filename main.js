@@ -8,6 +8,7 @@ const apps = require('./apps');
 const powers = require('./powers');
 const ai = require('./ai');
 const claude = require('./claude');
+const antigravity = require('./antigravity');
 
 // ---------- configuración (config.json, editable a mano) ----------
 const DEFAULT_CONFIG = {
@@ -128,11 +129,68 @@ function serializeMenu(items) {
   return walk(items);
 }
 
+// Claude: empezar conversación nueva y elegir sesión de Claude Code
+function ago(ms) {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (m < 60) return 'hace ' + m + ' min';
+  const h = Math.round(m / 60);
+  if (h < 24) return 'hace ' + h + ' h';
+  return 'hace ' + Math.round(h / 24) + ' d';
+}
+function claudeMenu() {
+  const cur = claude.current();
+  const sessions = claude.listCodeSessions(10);
+  const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  return {
+    label: 'Claude',
+    submenu: [
+      { label: 'Chat nuevo con Claude', click: () => { claude.reset('chat'); send('claude-reset:chat'); } },
+      { label: 'Sesión nueva de Claude Code', click: () => { claude.reset('code'); send('claude-reset:code'); } },
+      { type: 'separator' },
+      {
+        label: 'Sesiones de Claude Code',
+        submenu: sessions.length ? sessions.map((s) => ({
+          label: short(s.title, 34) + '  ·  ' + (/scratch-workspaces/i.test(s.cwd) ? 'temporal' : short(path.basename(s.cwd) || '?', 18)) + '  ·  ' + ago(s.last),
+          type: 'radio', checked: cur.code === s.id,
+          click: () => { claude.pickCodeSession(s.id, s.title); send('claude-pick:' + s.title); },
+        })) : [{ label: 'No encontré sesiones', enabled: false }],
+      },
+    ],
+  };
+}
+
+// Antigravity: conversación nueva y elegir una de las guardadas
+function antigravityMenu() {
+  const cur = antigravity.current();
+  const convs = antigravity.listConversations(10);
+  const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  return {
+    label: 'Antigravity',
+    submenu: [
+      { label: 'Conversación nueva', click: () => { antigravity.reset(); send('ag-reset'); } },
+      { type: 'separator' },
+      {
+        label: 'Conversaciones',
+        submenu: convs.length ? convs.map((c) => ({
+          label: short(c.title, 40) + (c.last ? '  ·  ' + ago(c.last) : ''),
+          type: 'radio', checked: cur.id === c.id,
+          click: () => { antigravity.pick(c.id, c.title); send('ag-pick:' + c.title); },
+        })) : [{ label: 'Todavía no hay conversaciones', enabled: false }],
+      },
+    ],
+  };
+}
+
 function menuTemplate() {
   return ([
     { label: 'Capri', enabled: false },
     { type: 'separator' },
     { label: 'Pedirle algo…', accelerator: config.atajoPedirleAlgo, click: () => send('ask') },
+    // después de enviarle algo a Claude, minimizar su ventana (apagado por defecto)
+    { label: 'Ventanas', type: 'checkbox', checked: !!aiState.ventanas,
+      click: () => { aiState.ventanas = !aiState.ventanas; ai.saveState(aiState); send('ventanas:' + (aiState.ventanas ? 'on' : 'off')); } },
+    claudeMenu(),
+    antigravityMenu(),
     { type: 'separator' },
     apiKeysMenu(),
     {
@@ -252,7 +310,12 @@ function createWindow() {
   const powersCtx = () => ({ config, win, games: () => apps.loadedGames() });
   ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, powersCtx()));
   // pasarle el texto a la app de Claude (chat o Claude Code) y darle Enter
-  ipcMain.handle('claude-send', (_e, target, text) => claude.send(target === 'code' ? 'code' : 'chat', text, config));
+  ipcMain.handle('claude-reset', (_e, target) => {
+    if (target === 'ag') antigravity.reset(); else claude.reset(target === 'code' ? 'code' : 'chat');
+    return true;
+  });
+  ipcMain.handle('ag-send', (_e, text) => antigravity.safeSend(text, config, { minimize: !!aiState.ventanas }));
+  ipcMain.handle('claude-send', (_e, target, text) => claude.safeSend(target === 'code' ? 'code' : 'chat', text, config, { minimize: !!aiState.ventanas }));
 
   // ---------- IA: proveedores y trabajos ----------
   ipcMain.handle('ai-status', () => aiInfo());

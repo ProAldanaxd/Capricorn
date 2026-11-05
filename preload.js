@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('capri', {
   focusInput: (on) => ipcRenderer.send('focus-input', on),
   // pasarle texto a la app de Claude: target 'chat' | 'code'
   claudeSend: (target, text) => ipcRenderer.invoke('claude-send', target, text),
+  claudeReset: (target) => ipcRenderer.invoke('claude-reset', target),
+  // lo mismo con la app de Antigravity
+  agSend: (text) => ipcRenderer.invoke('ag-send', text),
   onNotify: (cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
   // IA (Gemini): la clave y las llamadas viven en el proceso principal
   ai: {

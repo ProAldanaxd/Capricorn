@@ -15,6 +15,8 @@
     root.innerHTML = '';
     levels = [];
     api.menuOpen(false);
+    // el proceso principal acaba de dejar pasar los clics: si el cursor sigue sobre Capri, corregirlo ya
+    if (window.capriResyncIgnore) window.capriResyncIgnore();
   }
 
   // los submenús siguen la dirección del anterior (si uno se abrió a la izquierda, los demás también)

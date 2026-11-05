@@ -99,8 +99,38 @@ le da Enter por ti.
 | `@code revisa el README` | Sesión nueva de Claude Code |
 | `dile a Claude que…`, `pregúntale a Claude Code…` | Igual que arriba, en español |
 
-- Capri solo presiona Enter si la ventana del frente es Claude; si no, tu texto queda escrito
-  ahí para que lo envíes tú.
+- **Sigue en la misma conversación.** El primer mensaje abre un chat (o sesión de Code) nuevo;
+  los siguientes van a esa misma conversación hasta que pidas otra o cierres a Capri.
+  - Para empezar otra: escribe `nuevo` en modo CAPRI naranja / CAPRI CODE (o `@claude nuevo`,
+    `@code nueva sesión: …`), o clic derecho → **Claude** → *Chat nuevo* / *Sesión nueva*.
+  - En el chat, Capri pega en **el chat que tengas abierto**. En Claude Code regresa a la sesión
+    correcta aunque te hayas ido a otra.
+  - Para seguir, Capri pega con el portapapeles y luego te deja el texto que tenías copiado
+    (si tenías una imagen copiada, se reemplaza). Si no pudo pegar, el texto se queda
+    copiado para que lo pegues tú.
+  - Cada envío queda anotado (sin tu texto) en `%APPDATA%\capricorn\claude.log`.
+- **Elegir sesión de Claude Code:** clic derecho → **Claude** → *Sesiones de Claude Code* muestra
+  las 10 más recientes; la que elijas recibe lo que mandes en CAPRI CODE.
+- Capri solo presiona teclas si la ventana del frente es Claude; si no, te avisa.
+
+### Pasarle cosas a Antigravity
+
+Igual que con Claude, pero con la app de escritorio de **Antigravity**:
+
+| Cómo | Qué hace |
+|---|---|
+| **Tab** hasta `CAPRI AG://` (azul) | Lo que escribas va a Antigravity |
+| `@ag revisa el login`, `dile a Antigravity que…` | Lo mismo sin cambiar de modo |
+| `nuevo` en modo CAPRI AG, `@ag nuevo`, o clic derecho → **Antigravity** → *Conversación nueva* | La próxima vez abre una conversación nueva |
+| Clic derecho → **Antigravity** → *Conversaciones* | Elegir una conversación guardada (las 10 más recientes) |
+
+- Abre Antigravity si está cerrada o la trae al frente, presiona su botón *New Conversation*
+  cuando toca, pega tu texto en *Message input* y presiona *Send message*.
+- Sigue en la misma conversación hasta que pidas una nueva o cierres a Capri.
+- **Ventanas** también la minimiza después de enviar.
+- Las conversaciones las lee (solo lectura) de `%USERPROFILE%\.gemini\antigravity\conversation_summaries.db`.
+- Clic derecho → **Ventanas** (apagado por defecto): después de enviarlo, Capri minimiza la
+  ventana de Claude para que sigas en lo tuyo. Solo la minimiza si ella le dio Enter.
 - `claudeDarEnter: false` en `config.json` para que solo lo deje escrito.
 - `carpetaClaudeCode` fija la carpeta del proyecto para Claude Code (vacío = la que elija la app).
 - Si Claude estaba cerrada espera unos segundos más a que cargue antes del Enter.
@@ -200,6 +230,7 @@ commands.js      Cuadro "Pedirle algo", intérprete de órdenes y avisos.
 powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloqueadas) y los avisos.
 ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
 claude.js        Le pasa texto a la app de Claude (chat o Claude Code) y le da Enter.
+antigravity.js   Lo mismo con la app de Antigravity (por sus botones, vía accesibilidad).
 config.json      Ciudad y opciones.
 index.html       Página que carga todo.
 assets/
