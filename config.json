@@ -21,5 +21,7 @@
   "rutaHerramientas": "gemini",
   "ollama": true,
   "modeloOllama": "llama3.2:3b",
-  "segundosEntreComentariosOllama": 60
+  "segundosEntreComentariosOllama": 60,
+  "claudeDarEnter": true,
+  "carpetaClaudeCode": ""
 }

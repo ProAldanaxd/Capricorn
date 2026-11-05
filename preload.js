@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('capri', {
   // poderes: órdenes al proceso principal y avisos de vuelta
   cmd: (action, arg) => ipcRenderer.invoke('cmd', action, arg),
   focusInput: (on) => ipcRenderer.send('focus-input', on),
+  // pasarle texto a la app de Claude: target 'chat' | 'code'
+  claudeSend: (target, text) => ipcRenderer.invoke('claude-send', target, text),
   onNotify: (cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
   // IA (Gemini): la clave y las llamadas viven en el proceso principal
   ai: {

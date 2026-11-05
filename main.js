@@ -7,6 +7,7 @@ const fs = require('fs');
 const apps = require('./apps');
 const powers = require('./powers');
 const ai = require('./ai');
+const claude = require('./claude');
 
 // ---------- configuración (config.json, editable a mano) ----------
 const DEFAULT_CONFIG = {
@@ -15,6 +16,7 @@ const DEFAULT_CONFIG = {
   avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', desbloquearAccionesPeligrosas: false,
   ia: true, modeloIA: 'gemini-3.6-flash', comentariosIA: true, segundosEntreComentariosIA: 150, desbloquearComandos: false,
   ollama: true, modeloOllama: 'llama3.2:3b', segundosEntreComentariosOllama: 60,
+  claudeDarEnter: true, carpetaClaudeCode: '',
 };
 let config = DEFAULT_CONFIG;
 try { config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')) }; } catch { /* usa valores por defecto */ }
@@ -249,6 +251,8 @@ function createWindow() {
   // ---------- poderes: el cuadro de órdenes y los avisos ----------
   const powersCtx = () => ({ config, win, games: () => apps.loadedGames() });
   ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, powersCtx()));
+  // pasarle el texto a la app de Claude (chat o Claude Code) y darle Enter
+  ipcMain.handle('claude-send', (_e, target, text) => claude.send(target === 'code' ? 'code' : 'chat', text, config));
 
   // ---------- IA: proveedores y trabajos ----------
   ipcMain.handle('ai-status', () => aiInfo());

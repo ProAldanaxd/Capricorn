@@ -19,6 +19,18 @@
   const boxTag = document.getElementById('ask-tag');
   const boxHint = document.getElementById('ask-hint');
   let open = false, boxMode = 'ask';
+  // a quién va lo que escribes: Capri, el chat de Claude o Claude Code (Tab cambia)
+  const DESTS = ['capri', 'chat', 'code'];
+  // chat y code van a la app de Claude, pero la barra los muestra como Capri (en naranja)
+  const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://' };
+  let dest = 'capri';
+  function setDest(d) {
+    dest = d;
+    if (boxMode !== 'ask') return;
+    boxTag.textContent = DEST_TAG[d];
+    boxHint.textContent = 'Enter para enviar · Tab cambia modo · Esc para cerrar';
+    box.classList.toggle('to-claude', d !== 'capri');
+  }
 
   // El cuadro va ARRIBA del globo (sin encimarse). Si arriba no cabe, va debajo del globo.
   function placeBox() {
@@ -42,9 +54,11 @@
     if (pet.mode === 'sleep') wake();
     boxMode = mode;
     const isKey = mode === 'key';
-    boxTag.textContent = isKey ? 'API KEY DE GEMINI://' : 'PEDIRLE ALGO A CAPRI://';
+    boxTag.textContent = isKey ? 'API KEY DE GEMINI://' : 'CAPRI://';
     boxHint.textContent = isKey ? 'Pégala y Enter · se guarda cifrada · vacío = borrar · Esc cancela' : 'Enter para enviar · Esc para cerrar';
     input.type = isKey ? 'password' : 'text';
+    box.classList.remove('to-claude');
+    if (!isKey) setDest('capri');
     open = true;
     box.classList.add('show');
     input.value = '';
@@ -74,12 +88,18 @@
   setInterval(() => { if (open) placeBox(); }, 100);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { hideBox(); return; }
+    if (e.key === 'Tab' && boxMode === 'ask') {
+      e.preventDefault();
+      setDest(DESTS[(DESTS.indexOf(dest) + (e.shiftKey ? DESTS.length - 1 : 1)) % DESTS.length]);
+      return;
+    }
     if (e.key === 'Enter') {
       const text = input.value.trim();
-      const mode = boxMode;
+      const mode = boxMode, to = dest;
       input.value = '';
       hideBox();
       if (mode === 'key') submitKey(text);
+      else if (text && to !== 'capri') toClaude(to, text);
       else if (text) handle(text);
     }
   });
@@ -243,7 +263,48 @@
     }
     return false;
   }
+  // ---------------------------------------------------------------- pasarle cosas a Claude
+  // "@claude ...", "@code ...", "dile a Claude (Code) que ...", "pregúntale a Claude ..."
+  function claudeTarget(raw) {
+    const s = String(raw).trim();
+    let m = s.match(/^@(?:claude[\s-]*code|code|cc)\b[\s:,]*([\s\S]+)$/i);
+    if (m) return ['code', m[1]];
+    m = s.match(/^@claude\b[\s:,]*([\s\S]+)$/i);
+    if (m) return ['chat', m[1]];
+    m = s.match(/^(?:dile|preg[uú]ntale|p[aá]sale|m[aá]ndale|p[ií]dele|escr[ií]bele)\s+a\s+claude(\s+code)?\b[\s:,]*(?:que\s+)?([\s\S]+)$/i);
+    if (m) return [m[1] ? 'code' : 'chat', m[2]];
+    return null;
+  }
+  let claudeBusy = false;
+  async function toClaude(target, text) {
+    lastInteract = Date.now();
+    const name = target === 'code' ? 'Claude Code' : 'Claude';
+    if (claudeBusy) { reply('Espérame, todavía le estoy pasando lo anterior a ' + name + '.', 3); return; }
+    claudeBusy = true;
+    window.capriConvo.begin();
+    try {
+      pet.glitch = 0.35;
+      say(pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: 'CLAUDE', user: true });
+      const r = await api.claudeSend(target, text);
+      if (!r || !r.ok) {
+        reply(r && r.error === 'empty' ? 'No escribiste nada, choom.' : 'No pude abrir la app de Claude. ¿Está instalada?', 3.5);
+        return;
+      }
+      if (r.result === 'sent') say(pick(['Listo, ya se lo mandé a ' + name + '.', 'Enviado. ' + name + ' ya está en eso.', 'Hecho, le di Enter por ti.']) + (r.truncated ? ' Era muy largo y lo recorté.' : ''), 3, { badge: 'CLAUDE', user: true });
+      else if (r.result === 'focused') say('Te lo dejé escrito en ' + name + '. Tú le das Enter.', 3, { badge: 'CLAUDE', user: true });
+      else if (r.result === 'nofocus') say(name + ' no se dejó traer al frente. Tu texto quedó escrito ahí; dale Enter tú.', 4, { badge: 'CLAUDE', user: true });
+      else if (r.result === 'dry') say('(prueba) ' + name + ' ← ' + text.slice(0, 60), 3, { badge: 'CLAUDE', user: true });
+      else say('Algo raro pasó con ' + name + '. Revisa si tu texto quedó ahí.', 3.5, { badge: 'CLAUDE', user: true });
+    } finally {
+      claudeBusy = false;
+      window.capriConvo.end();
+    }
+  }
+  window.capriToClaude = toClaude;
+
   async function handle(raw) {
+    const ct = claudeTarget(raw);
+    if (ct) return toClaude(ct[0], ct[1].trim());
     lastInteract = Date.now();
     window.capriConvo.begin(); // hasta que te responda, ningún otro mensaje la interrumpe
     try {
@@ -418,6 +479,11 @@
     test.split('|').forEach((c, i) => setTimeout(async () => {
       console.log('CMD>', c);
       if (c === '__box') { showBox(); input.value = 'abre cyberpunk'; return; }
+      if (c.startsWith('__tab:')) { // abre la barra, cambia de destino n veces y deja texto
+        showBox(); for (let k = 0; k < +c.slice(6); k++) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', cancelable: true }));
+        input.value = 'explícame qué hace main.js'; console.log('DEST>', dest, boxTag.textContent); return;
+      }
+      if (c === '__enter') { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); setTimeout(() => console.log('SAID>', bubbleBadge.textContent, bub.text), 900); return; }
       if (c === '__still' || c === '__move') { setMovement(c === '__move'); console.log('MODE>', pet.mode, 'moving', movementOn); return; }
       if (c.startsWith('__spont:')) {
         const d = c.slice(8);

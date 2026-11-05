@@ -172,7 +172,7 @@ let bubQueue = [];
 const GLYPHS = '01#$%&@<>/\\|=+*';
 function setBubbleBadge(b) {
   bubbleBadge.textContent = b;
-  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : b === 'OLLAMA' ? ' ollama' : '');
+  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : b === 'OLLAMA' ? ' ollama' : b === 'CLAUDE' ? ' claude' : '');
 }
 function splitText(text, max = 150) {
   const t = String(text).replace(/\s+/g, ' ').trim();

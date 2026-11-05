@@ -86,6 +86,25 @@ Presiona **`Ctrl + Alt + C`** (o clic derecho → *Pedirle algo…*) y escribe l
 También te avisa sola: batería baja, CPU o RAM al tope, poco espacio en disco, descargas
 terminadas y USB conectadas.
 
+### Pasarle cosas a Claude
+
+Desde la misma barra, Capri le pasa tu texto a la app de escritorio de **Claude**: la abre si
+está cerrada o la trae al frente si ya está abierta, lo escribe en una conversación nueva y
+le da Enter por ti.
+
+| Cómo | A dónde va |
+|---|---|
+| **Tab** en la barra: `CAPRI` (rosa) → `CAPRI` (naranja, va a Claude) → `CAPRI CODE` (naranja, va a Claude Code) | Al modo elegido |
+| `@claude explícame los hooks` | Chat nuevo de Claude |
+| `@code revisa el README` | Sesión nueva de Claude Code |
+| `dile a Claude que…`, `pregúntale a Claude Code…` | Igual que arriba, en español |
+
+- Capri solo presiona Enter si la ventana del frente es Claude; si no, tu texto queda escrito
+  ahí para que lo envíes tú.
+- `claudeDarEnter: false` en `config.json` para que solo lo deje escrito.
+- `carpetaClaudeCode` fija la carpeta del proyecto para Claude Code (vacío = la que elija la app).
+- Si Claude estaba cerrada espera unos segundos más a que cargue antes del Enter.
+
 ### Acciones bloqueadas
 
 Estas existen pero vienen **bloqueadas**. Para usarlas pon `"desbloquearAccionesPeligrosas": true`
@@ -120,6 +139,8 @@ Edita [`config.json`](config.json) y reinicia Capri:
 | `ollama` | Si Ollama arranca activado la primera vez (luego manda el menú) |
 | `modeloOllama` | Modelo local (por defecto `llama3.2:3b`) |
 | `segundosEntreComentariosOllama` | Mínimo de segundos entre comentarios con Ollama (por defecto 60) |
+| `claudeDarEnter` | `false` para que Capri solo deje el texto escrito en Claude, sin enviarlo |
+| `carpetaClaudeCode` | Carpeta del proyecto para las sesiones de Claude Code (vacío = la de la app) |
 
 ## Requisitos
 
@@ -178,6 +199,7 @@ watcher.ps1      Pequeño script que reporta la ventana activa a apps.js.
 commands.js      Cuadro "Pedirle algo", intérprete de órdenes y avisos.
 powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloqueadas) y los avisos.
 ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
+claude.js        Le pasa texto a la app de Claude (chat o Claude Code) y le da Enter.
 config.json      Ciudad y opciones.
 index.html       Página que carga todo.
 assets/
