@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('capri', {
     unloadOllama: () => ipcRenderer.send('ollama-unload'),
   },
   setIgnore: (v) => ipcRenderer.send('set-ignore', v),
-  showMenu: (s) => ipcRenderer.send('show-menu', s),
+  showMenu: (s, x, y) => ipcRenderer.send('show-menu', s, x, y),
+  onMenu: (cb) => ipcRenderer.on('menu', (_e, items, x, y) => cb(items, x, y)),
+  menuClick: (id) => ipcRenderer.send('menu-click', id),
+  menuOpen: (open) => ipcRenderer.send('menu-open', open),
   sendState: (s) => ipcRenderer.send('state', s),
 });

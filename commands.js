@@ -10,7 +10,8 @@
   const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => (v[k] !== undefined ? v[k] : ''));
   const R = (arr, v = {}) => fill(pick(arr && arr.length ? arr : ['...']), v);
   const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¿?¡!.,;:"']+/g, ' ').replace(/\s+/g, ' ').trim();
-  const reply = (text, hold = 3.2) => { say(text, hold); };
+  // respuestas a lo que escribiste: tienen prioridad sobre comentarios y avisos
+  const reply = (text, hold = 3.2) => { say(text, hold, { user: true }); };
 
   // ---------------------------------------------------------------- cuadro de texto
   const box = document.getElementById('ask');
@@ -52,11 +53,13 @@
     setTimeout(() => input.focus(), 60);
     if (INTERRUPTIBLE.has(pet.mode) || pet.mode === 'float') setMode('look', 999);
     nextDecision = T + 999;
-    say(isKey ? 'Pásame la clave de Google AI Studio. No se la digo a nadie.' : R(P.ask), 2);
+    say(isKey ? 'Pásame la clave de Google AI Studio. No se la digo a nadie.' : R(P.ask), 2, { user: true });
+    window.capriConvo.begin(); // mientras escribes, nadie interrumpe
   }
   function hideBox() {
     if (!open) return;
     open = false;
+    window.capriConvo.end();
     box.classList.remove('show');
     input.blur();
     api.focusInput(false);
@@ -229,26 +232,31 @@
     const res = await api.ai.ask('chat', raw, aiContext());
     think(false);
     if (pet.mode === 'look') setMode('idle');
-    if (res.ok) { say(res.text, 3.8, { badge: BADGE[res.provider] || 'SYNC' }); return true; }
+    if (res.ok) { say(res.text, 3.8, { badge: BADGE[res.provider] || 'SYNC', user: true }); return true; }
     aiFailed(res);
     if (T - aiErrorToldAt > 600 && res.error !== 'off') { // avisar del problema, sin repetirlo a cada rato
       aiErrorToldAt = T;
       const why = { quota: 'Se acabó mi cuota de IA por ahora', key: 'Mi API key no funciona (revísala en el menú)', network: 'No tengo internet',
         timeout: 'La IA tardó demasiado', nokey: 'Me falta la API key', nomodel: 'No encontré el modelo de IA', unavailable: 'Mi IA no está disponible' }[res.error] || 'La IA falló';
-      say(why + '. Uso mis reglas mientras.', 3, { badge: 'LOCAL' });
+      say(why + '. Uso mis reglas mientras.', 3, { badge: 'LOCAL', user: true });
       await new Promise((r) => setTimeout(r, 2600));
     }
     return false;
   }
   async function handle(raw) {
     lastInteract = Date.now();
-    const rulesFirst = aiInfo.routes.herramientas === 'none';
-    if (!rulesFirst && chatPossible() && await askAi(raw)) return;
-    const r = await handleRules(raw);
-    if (r !== 'unknown') return;
-    if (rulesFirst && chatPossible() && await askAi(raw)) return;
-    pet.glitch = 0.4;
-    reply(R(P.unknown), 4);
+    window.capriConvo.begin(); // hasta que te responda, ningún otro mensaje la interrumpe
+    try {
+      const rulesFirst = aiInfo.routes.herramientas === 'none';
+      if (!rulesFirst && chatPossible() && await askAi(raw)) return;
+      const r = await handleRules(raw);
+      if (r !== 'unknown') return;
+      if (rulesFirst && chatPossible() && await askAi(raw)) return;
+      pet.glitch = 0.4;
+      reply(R(P.unknown), 4);
+    } finally {
+      window.capriConvo.end();
+    }
   }
 
   async function handleRules(raw) {
@@ -350,7 +358,7 @@
       const extra = r.cpu > 80 || r.ram > 85 ? ' Está sudando un poco.' : ' Todo tranquilo.';
       reply(R(P.perf, { cpu: r.cpu, ram: r.ram, extra })); return;
     }
-    if (has(t, 'clima|temperatura|llueve|llover') || /que tiempo hace/.test(t)) { window.capriEnv && window.capriEnv.weatherReport(); return; }
+    if (has(t, 'clima|temperatura|llueve|llover') || /que tiempo hace/.test(t)) { window.capriEnv && window.capriEnv.weatherReport({ user: true }); return; }
 
     return 'unknown'; // no es una orden conocida: quien llamó decide (Ollama o "no entendí")
   }
@@ -418,6 +426,28 @@
       }
       if (c.startsWith('__chat:')) { await handle(c.slice(7)); setTimeout(() => console.log('SAID>', bubbleBadge.textContent, bub.text), 300); return; }
       if (c === '__ai') { console.log('AI>', JSON.stringify(aiInfo), 'badge', window.capriDefaultBadge()); return; }
+      if (c.startsWith('__race:')) {
+        // simula que llega un comentario mientras Capri responde
+        const q = c.slice(7);
+        setTimeout(() => say('COMENTARIO QUE INTERRUMPE', 3), 400);
+        setTimeout(() => window.capriSpeak('El usuario abrió Discord.', 'RESPALDO QUE INTERRUMPE', { force: true }), 900);
+        const log = setInterval(() => console.log('BUB>', bub.thinking ? '(pensando)' : bub.text), 1500);
+        await handle(q);
+        setTimeout(() => clearInterval(log), 30000);
+        return;
+      }
+      if (c === '__menu') {
+        api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }, Math.round(pet.x - 120), Math.round(baseY() - 420));
+        setTimeout(() => {
+          const r = [...document.querySelectorAll('.cm-item')].find((e) => e.textContent.includes('API Keys'));
+          if (r) r.dispatchEvent(new MouseEvent('mouseenter'));
+          setTimeout(() => {
+            const j = [...document.querySelectorAll('.cm-item')].find((e) => e.textContent.includes('Plática'));
+            if (j) j.dispatchEvent(new MouseEvent('mouseenter'));
+          }, 300);
+        }, 600);
+        return;
+      }
       if (c === '__afk') { window.__fakeIdle = true; window.capriEnv.idle(9999); return; }
       if (c === '__back') { window.capriEnv.idle(0); window.__fakeIdle = false; return; }
       if (c === '__state') { console.log('MODE>', pet.mode, 'moving', movementOn, 'onFloor', onFloor()); return; }
@@ -428,3 +458,4 @@
     }, 3000 + i * 3500));
   }
 })();
+

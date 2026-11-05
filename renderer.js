@@ -199,12 +199,39 @@ function showBubbleItem(it) {
   bubbleEl.classList.remove('thinking');
   bubbleEl.classList.add('show');
 }
+// ---- candado de conversación: mientras escribes o esperas su respuesta (y mientras la lees),
+// los demás mensajes (comentarios, avisos, frases al azar) esperan su turno y salen después.
+let convoDepth = 0, convoUntil = 0;
+const deferredSays = [];
+const convoActive = () => convoDepth > 0 || T < convoUntil;
+window.capriConvo = {
+  begin() { convoDepth++; },
+  end() { convoDepth = Math.max(0, convoDepth - 1); },
+  active: convoActive,
+};
+function flushDeferred() {
+  if (convoActive() || bub.active || !deferredSays.length) return;
+  const [text, hold, opts] = deferredSays.shift();
+  say(text, hold, opts);
+}
+
 // opts.queue: si ya hay un globo, se forma detrás en lugar de reemplazarlo
+// opts.user: es respuesta a lo que escribiste (tiene prioridad y no la interrumpe nada)
 function say(text, hold = 2.8, opts = {}) {
   if (!text) return;
+  if (!opts.user && convoActive()) {
+    deferredSays.push([text, hold, opts]);
+    if (deferredSays.length > 2) deferredSays.shift(); // solo los más recientes
+    return;
+  }
   const chunks = splitText(text);
   const items = chunks.map((c, i) => ({ text: c, hold: i < chunks.length - 1 ? 1.8 : hold, page: chunks.length > 1 ? `${i + 1} / ${chunks.length}` : '',
     badge: opts.badge }));
+  if (opts.user) {
+    // lo protege mientras lo lees (todas sus partes) y un respiro de 1.5 s
+    const readTime = items.reduce((s, it) => s + it.text.length * 0.03 + it.hold, 0);
+    convoUntil = Math.max(convoUntil, T + readTime + 1.5);
+  }
   if (opts.queue && bub.active && !bub.thinking) { bubQueue.push(...items); return; }
   bubQueue = items.slice(1);
   showBubbleItem(items[0]);
@@ -221,7 +248,7 @@ function think(on) {
   }
 }
 function updateBubble() {
-  if (!bub.active) return;
+  if (!bub.active) { flushDeferred(); return; }
   if (!bub.thinking) {
     const n = Math.floor((T - bub.start) / 0.03);
     let s = bub.text.slice(0, n);
@@ -331,7 +358,7 @@ let dragVx = 0, dragVy = 0, clickTimer = null;
 let ignoring = true;
 
 function updateIgnore() {
-  const want = !(down || hit(cur.x, cur.y) || (window.uiHit && window.uiHit(cur.x, cur.y)));
+  const want = !(window.capriMenuOpen || down || hit(cur.x, cur.y) || (window.uiHit && window.uiHit(cur.x, cur.y)));
   if (want !== ignoring) { ignoring = want; api.setIgnore(want); }
 }
 
@@ -381,7 +408,7 @@ addEventListener('dblclick', (e) => {
 });
 addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  if (hit(e.clientX, e.clientY)) api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S });
+  if (hit(e.clientX, e.clientY)) api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }, e.clientX, e.clientY);
 });
 
 function endDrag(d) {

@@ -251,12 +251,12 @@
     idle: (s) => { if (!window.__fakeIdle) onIdle(s); }, // en pruebas se ignora la actividad real
     weather: onWeather,
   });
-  function weatherReport() {
-    if (!weather) { say('Todavía no sé el clima. ¿Hay internet?', 2.5); return; }
-    say(pickFrom('weatherReport', LINES.weatherReport, wvars()) + (Math.abs(weather.feels - weather.temp) >= 3 ? ' Se siente como ' + Math.round(weather.feels) + '°.' : ''), 3.5);
+  function weatherReport(opts = {}) {
+    if (!weather) { say('Todavía no sé el clima. ¿Hay internet?', 2.5, opts); return; }
+    say(pickFrom('weatherReport', LINES.weatherReport, wvars()) + (Math.abs(weather.feels - weather.temp) >= 3 ? ' Se siente como ' + Math.round(weather.feels) + '°.' : ''), 3.5, opts);
     lastEnvTalk = T;
   }
-  api.onAction((a) => { if (a === 'weather') weatherReport(); });
+  api.onAction((a) => { if (a === 'weather') weatherReport({ user: true }); });
   setInterval(appTick, 1000);
   setInterval(clockTick, 30 * 1000);
   setInterval(weatherFx, 60);

@@ -100,15 +100,34 @@ function apiKeysMenu() {
       },
       { type: 'separator' },
       { label: 'Qué hace cada IA', enabled: false },
-      job('comentarios', 'Comentarios espontáneos', {}, 'Ninguna (frases fijas)'),
-      job('platica', 'Plática', { gemini: ' (con búsqueda en internet)' }),
-      job('herramientas', 'Herramientas', { ollama: ' (experimental)' }, 'Ninguna (solo reglas)'),
+      job('comentarios', 'Comentarios espontáneos', {}, 'Ninguna'),
+      job('platica', 'Plática', {}),
+      job('herramientas', 'Herramientas', {}, 'Ninguna'),
     ],
   };
 }
 
-function buildMenu() {
-  return Menu.buildFromTemplate([
+function buildMenu() { return Menu.buildFromTemplate(menuTemplate()); } // menú nativo (ícono junto al reloj)
+
+// Menú con estilo de Capri: se manda como datos a la ventana y los clics regresan por id.
+let menuHandlers = new Map();
+function serializeMenu(items) {
+  menuHandlers = new Map();
+  let n = 0;
+  const walk = (list) => list.map((it) => {
+    if (it.type === 'separator') return { type: 'separator' };
+    const id = 'm' + n++;
+    if (it.click) menuHandlers.set(id, it.click);
+    return { id, label: it.label, type: it.type || 'normal', checked: !!it.checked, enabled: it.enabled !== false,
+      accelerator: it.accelerator || '', submenu: it.submenu ? walk(it.submenu) : null };
+  });
+  // el título "Capri" ya lo pone el menú con estilo (CAPRI://MENU)
+  while (items.length && (items[0].type === 'separator' || (items[0].label === 'Capri' && items[0].enabled === false))) items = items.slice(1);
+  return walk(items);
+}
+
+function menuTemplate() {
+  return ([
     { label: 'Capri', enabled: false },
     { type: 'separator' },
     { label: 'Pedirle algo…', accelerator: config.atajoPedirleAlgo, click: () => send('ask') },
@@ -330,9 +349,20 @@ ipcMain.on('set-ignore', (_e, ignore) => {
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!!ignore, { forward: true });
 });
 
-ipcMain.on('show-menu', (_e, s) => {
+ipcMain.on('show-menu', (_e, s, x, y) => {
   state = { ...state, ...s };
-  buildMenu().popup({ window: win });
+  if (win && !win.isDestroyed()) win.webContents.send('menu', serializeMenu(menuTemplate()), x, y);
+});
+ipcMain.on('menu-click', (_e, id) => {
+  const h = menuHandlers.get(id);
+  if (h) Promise.resolve().then(() => h()).catch(() => {});
+});
+// mientras el menú está abierto, la ventana atrapa todos los clics (para cerrarlo al hacer clic afuera)
+ipcMain.on('menu-open', (_e, open) => {
+  if (!win || win.isDestroyed()) return;
+  win.setIgnoreMouseEvents(!open, { forward: true });
+  win.setFocusable(!!open);
+  if (open) { win.focus(); win.webContents.focus(); } else win.blur();
 });
 
 ipcMain.on('state', (_e, s) => {

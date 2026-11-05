@@ -41,6 +41,25 @@
     @keyframes dots { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
     #bubble .page { font-size: 10px; letter-spacing: 2px; color: #b7a9cc; text-align: right; margin-top: 4px; }
     #bubble .page:empty { display: none; }
+    /* ===== menú del clic derecho (estilo Capri) ===== */
+    .cm-panel { position: fixed; min-width: 230px; max-width: 360px; z-index: 50;
+      font-family: Bahnschrift, 'Segoe UI', sans-serif; color: #f4eefc; filter: drop-shadow(0 6px 12px rgba(0,0,0,.5)); }
+    .cm-slab, .cm-body { clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+    .cm-slab { position: absolute; inset: 0; transform: translate(6px, 6px); background: linear-gradient(135deg, #7b3cff, #4b1fa8); }
+    .cm-body { position: relative; padding: 8px 6px; background: #160f1e; box-shadow: inset 0 0 0 1.5px rgba(123,60,255,.55); }
+    .cm-tag { font: 10px Consolas, 'Cascadia Mono', monospace; letter-spacing: 2px; color: #ff2a6d; text-shadow: 0 0 6px #ff2a6d; padding: 2px 10px 7px; }
+    .cm-item { position: relative; display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 8px; font-size: 14px; cursor: default;
+      clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+    .cm-item:hover:not(.disabled), .cm-item.open { background: rgba(123,60,255,.32); box-shadow: inset 3px 0 0 #27f59b; }
+    .cm-item.disabled { color: #8c7fa3; }
+    .cm-item.disabled:first-child, .cm-tag + .cm-item.disabled { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; }
+    .cm-mark { width: 14px; text-align: center; color: #27f59b; text-shadow: 0 0 6px rgba(39,245,155,.7); font-size: 13px; flex: 0 0 auto; }
+    .cm-mark.radio { font-size: 11px; }
+    .cm-item:not(:hover) .cm-mark.radio:not(:empty) { opacity: .95; }
+    .cm-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cm-acc { font: 11px Consolas, monospace; color: #b7a9cc; margin-left: 10px; }
+    .cm-arrow { color: #ff2368; font-size: 16px; margin-left: 6px; }
+    .cm-sep { height: 1px; margin: 5px 8px; background: linear-gradient(90deg, transparent, rgba(123,60,255,.8), transparent); }
     /* cuadro para pedirle cosas */
     #ask {
       position: fixed; left: 0; top: 0; width: 300px; display: none;
@@ -72,6 +91,7 @@
     </div>
     <div class="tail-slab"></div><div class="tail"></div>
   </div>
+  <div id="capri-menu"></div>
   <div id="ask"><span class="tag" id="ask-tag">PEDIRLE ALGO A CAPRI://</span>
     <input id="ask-input" type="text" spellcheck="false" autocomplete="off">
     <div class="hint" id="ask-hint">Enter para enviar · Esc para cerrar</div>
@@ -81,5 +101,6 @@
   <script src="renderer.js"></script>
   <script src="env.js"></script>
   <script src="commands.js"></script>
+  <script src="menu.js"></script>
 </body>
 </html>
