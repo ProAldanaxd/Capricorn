@@ -24,25 +24,39 @@
     b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
     return b;
   };
-  const tag = (kind, session) => 'CLAUDE CODE // ' + kind + (session ? '  ·  ' + session : '');
+  // de qué app viene: Claude Code (naranja) o Antigravity (azul)
+  const APP = {
+    claude: { tag: 'CLAUDE CODE', name: 'Claude', badge: 'CLAUDE' },
+    ag: { tag: 'ANTIGRAVITY', name: 'Antigravity', badge: 'AG' },
+  };
+  const appOf = (p) => APP[p.app] || APP.claude;
+  const tag = (p, kind) => appOf(p).tag + ' // ' + kind + (p.session ? '  ·  ' + p.session : '');
 
   function render() {
-    const p = cur.p;
+    const p = cur.p, A = appOf(p);
+    panel.classList.toggle('ag', p.app === 'ag');
     elOpts.innerHTML = '';
     elDetail.textContent = ''; elDetail.style.display = 'none';
-    elOpts.classList.toggle('col', p.kind !== 'permission');
+    const detail = (t) => { if (t) { elDetail.textContent = t; elDetail.style.display = ''; } };
+    elOpts.classList.toggle('col', p.kind !== 'permission' && p.kind !== 'notice');
     if (p.kind === 'permission') {
-      elTag.textContent = tag('PERMISO', p.session);
-      elTitle.textContent = 'Claude quiere usar ' + p.tool;
-      if (p.detail) { elDetail.textContent = p.detail; elDetail.style.display = ''; }
+      elTag.textContent = tag(p, 'PERMISO');
+      elTitle.textContent = p.title;
+      detail(p.detail);
       elOpts.append(
         btn('Permitir', 'ok', () => answer('allow')),
         btn('Negar', 'no', () => answer('deny')),
-        btn('En Claude', 'alt', () => answer('claude')));
-      elFoot.textContent = 'Solo esta vez · si no contestas, se queda en Claude';
+        btn('En ' + A.name, 'alt', () => answer('app')));
+      elFoot.textContent = 'Solo esta vez · si no contestas, se queda en ' + A.name;
+    } else if (p.kind === 'notice') {
+      elTag.textContent = tag(p, 'PREGUNTA');
+      elTitle.textContent = p.question || p.title;
+      detail(p.detail);
+      p.buttons.forEach((l, i) => elOpts.append(btn(l, i ? 'alt' : 'ok', () => answer(l))));
+      elFoot.textContent = 'Esta se contesta en ' + A.name;
     } else if (p.kind === 'question') {
       const q = p.questions[cur.step];
-      elTag.textContent = tag('PREGUNTA' + (p.questions.length > 1 ? ` ${cur.step + 1}/${p.questions.length}` : ''), p.session);
+      elTag.textContent = tag(p, 'PREGUNTA' + (p.questions.length > 1 ? ` ${cur.step + 1}/${p.questions.length}` : ''));
       elTitle.textContent = q.question;
       for (const o of q.options) {
         const on = cur.picked.includes(o.label);
@@ -50,11 +64,11 @@
       }
       const row = document.createElement('div'); row.className = 'cp-row';
       if (q.multiSelect) row.append(btn('Listo', 'ok', () => nextQuestion(q)));
-      row.append(btn('En Claude', 'alt', () => answer('claude')));
+      row.append(btn('En Claude', 'alt', () => answer('app')));
       elOpts.append(row);
       elFoot.textContent = 'Para escribir otra respuesta, contesta en Claude';
     } else {
-      elTag.textContent = tag('TE PREGUNTA', p.session);
+      elTag.textContent = tag(p, 'TE PREGUNTA');
       elTitle.textContent = p.question;
       for (const l of p.buttons) elOpts.append(btn(l, 'ok', () => answer(l)));
       elOpts.append(btn('Cerrar', 'alt', () => answer('close')));
@@ -82,13 +96,13 @@
 
   function answer(value) {
     if (!cur) return;
-    const id = cur.p.id;
+    const id = cur.p.id, A = appOf(cur.p), kind = cur.p.kind, o = { badge: A.badge, user: true };
     api.promptAnswer(id, value);
-    if (value === 'allow') say('Va, le di permiso.', 2, { badge: 'CLAUDE', user: true });
-    else if (value === 'deny') say('Negado. Claude ya sabe que no.', 2, { badge: 'CLAUDE', user: true });
-    else if (value && value.answers) say('Listo, le pasé tu respuesta.', 2, { badge: 'CLAUDE', user: true });
-    else if (value === 'claude') say('Ok, contéstale tú en Claude.', 2, { badge: 'CLAUDE', user: true });
-    else if (typeof value === 'string' && value !== 'close') say('Le mando: "' + value + '"', 2.5, { badge: 'CLAUDE', user: true });
+    if (value === 'allow') say('Va, le di permiso.', 2, o);
+    else if (value === 'deny') say('Negado. ' + A.name + ' ya sabe que no.', 2, o);
+    else if (value && value.answers) say('Listo, le pasé tu respuesta.', 2, o);
+    else if (value === 'app') say('Ok, contéstale tú en ' + A.name + '.', 2, o);
+    else if (kind === 'reply' && typeof value === 'string' && value !== 'close') say('Le mando: "' + value + '"', 2.5, o);
     close(id);
   }
 
@@ -101,9 +115,9 @@
     place.last = null;
     panel.classList.add('show');
     render();
-    const k = cur.p.kind;
-    say(k === 'permission' ? '¡Oye! Claude necesita tu permiso.' : k === 'question' ? 'Claude te está preguntando algo.' : 'Claude espera tu respuesta.',
-      3, { badge: 'CLAUDE', user: true });
+    const k = cur.p.kind, A = appOf(cur.p);
+    say(k === 'permission' ? '¡Oye! ' + A.name + ' necesita tu permiso.' : k === 'reply' ? A.name + ' espera tu respuesta.' : A.name + ' te está preguntando algo.',
+      3, { badge: A.badge, user: true });
   }
   function close(id) {
     if (cur && cur.p.id === id) {
@@ -162,15 +176,63 @@
     else say('Algo falló al mandárselo a Claude.', 3, { badge: 'CLAUDE' });
   });
 
-  // pruebas: ?cmdtest=__prompt:permission|question|reply
+  // ------------------------------------------------------------ "qué está haciendo" (debajo de Capri)
+  // Una línea por app: la última herramienta que usó. Se borra al terminar o tras 90 s sin noticias.
+  const strip = document.getElementById('capri-status');
+  const acts = new Map(); // 'src:key' -> { src, session, text, at }
+  const SRC = { claude: 'CLAUDE', ag: 'AG' };
+  function renderStrip() {
+    const now = Date.now();
+    for (const [k, v] of acts) if (now - v.at > 90000) acts.delete(k);
+    // la más reciente de cada app
+    const per = new Map();
+    for (const v of acts.values()) if (!per.has(v.src) || per.get(v.src).at < v.at) per.set(v.src, v);
+    strip.textContent = '';
+    for (const v of [...per.values()].sort((a, b) => b.at - a.at)) {
+      const line = document.createElement('div'); line.className = 'cs-line cs-' + v.src;
+      const who = document.createElement('span'); who.className = 'cs-who'; who.textContent = SRC[v.src] || v.src;
+      const what = document.createElement('span'); what.className = 'cs-what';
+      what.textContent = (v.session ? v.session + ' › ' : '') + v.text;
+      line.append(who, what); strip.appendChild(line);
+    }
+    strip.classList.toggle('show', per.size > 0);
+  }
+  function placeStrip() {
+    if (!strip.classList.contains('show')) return;
+    strip.style.visibility = pet.mode === 'hidden' ? 'hidden' : '';
+    const w = strip.offsetWidth, h = strip.offsetHeight;
+    const left = clamp(pet.x - w / 2, 8, W - w - 8), top = clamp(baseY() + 8, 8, H - h - 4);
+    strip.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  }
+  setInterval(placeStrip, 50);
+  setInterval(renderStrip, 5000);
+  api.onStatus((s) => {
+    const k = s.src + ':' + s.key;
+    if (s.done) {
+      acts.delete(k);
+      if (s.notify && s.src === 'ag') {
+        say(s.reason === 'error' ? 'Antigravity se detuvo por un error.' : s.reason === 'max_steps_exceeded' ? 'Antigravity se detuvo: llegó a su límite de pasos.' : 'Antigravity ya acabó.', 3, { badge: 'AG' });
+      }
+    } else acts.set(k, { src: s.src, session: s.session, text: s.text, at: Date.now() });
+    renderStrip(); placeStrip();
+  });
+
+  // pruebas: ?cmdtest=__prompt:permission|question|reply|agperm|agq  y  __status
   window.capriTestPrompt = (kind) => {
     const id = 'test' + Date.now();
-    const base = { id, session: 'Prueba' };
+    const base = { id, session: 'Prueba', app: 'claude' };
     const p = kind === 'question'
       ? { ...base, kind, questions: [{ question: '¿Qué color?', header: 'Color', multiSelect: false, options: [{ label: 'Rosa', description: 'El de Capri' }, { label: 'Verde', description: '' }] },
         { question: '¿Qué extras?', header: 'Extras', multiSelect: true, options: [{ label: 'Brillo', description: '' }, { label: 'Sombra', description: '' }] }] }
       : kind === 'reply' ? { ...base, kind, question: '¿Le hago el aviso de permisos a Capri?', buttons: ['Sí, hazlo', 'Todavía no'] }
-        : { ...base, kind: 'permission', tool: 'Bash', detail: 'npm run build' };
+        : kind === 'agperm' ? { ...base, app: 'ag', kind: 'permission', title: 'Antigravity quiere correr un comando', detail: 'npm test' }
+          : kind === 'agq' ? { ...base, app: 'ag', kind: 'notice', title: 'Antigravity te está preguntando', question: '¿Qué framework uso?', detail: '· React\n· Vue', buttons: ['Ir a Antigravity', 'Ok'] }
+            : { ...base, kind: 'permission', title: 'Claude quiere usar Bash', detail: 'npm run build' };
     queue.push(p); show();
+  };
+  window.capriTestStatus = () => {
+    acts.set('claude:t', { src: 'claude', session: 'Capri', text: 'editando main.js', at: Date.now() });
+    acts.set('ag:t', { src: 'ag', session: 'Mi web', text: 'leyendo config.json', at: Date.now() - 1000 });
+    renderStrip(); placeStrip();
   };
 })();

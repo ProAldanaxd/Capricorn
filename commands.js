@@ -24,6 +24,62 @@
   // chat y code van a la app de Claude (naranja), ag a Antigravity (azul); todos se muestran como Capri
   const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://', ag: 'CAPRI AG://' };
   let dest = 'capri';
+
+  // ---- imágenes pegadas (Ctrl+V) para mandárselas a Claude / Antigravity junto con el texto
+  const thumbs = document.getElementById('ask-thumbs');
+  const offer = document.getElementById('ask-offer');
+  const MAX_IMGS = 4, MAX_IMG_BYTES = 12 * 1024 * 1024;
+  let images = []; // data URLs
+  function renderThumbs() {
+    thumbs.textContent = '';
+    images.forEach((src, i) => {
+      const d = document.createElement('div'); d.className = 'ask-thumb';
+      const im = document.createElement('img'); im.src = src;
+      const x = document.createElement('div'); x.className = 'x'; x.textContent = '✕'; x.title = 'Quitar';
+      x.addEventListener('mousedown', (e) => { e.preventDefault(); images.splice(i, 1); renderThumbs(); });
+      d.append(im, x); thumbs.appendChild(d);
+    });
+    thumbs.classList.toggle('has', images.length > 0);
+    if (images.length) offer.classList.remove('show');
+    placeBox();
+  }
+  function addImageBlob(blob) {
+    if (!blob || !/^image\//.test(blob.type)) return;
+    if (images.length >= MAX_IMGS) { say('Máximo ' + MAX_IMGS + ' imágenes por mensaje.', 2.5, { user: true }); return; }
+    if (blob.size > MAX_IMG_BYTES) { say('Esa imagen está muy pesada para pasarla.', 2.5, { user: true }); return; }
+    const r = new FileReader();
+    r.onload = () => { images.push(String(r.result)); renderThumbs(); };
+    r.readAsDataURL(blob);
+  }
+  function clearImages() { images = []; offer.classList.remove('show'); renderThumbs(); }
+  // la captura recién copiada (Win+Shift+S): Capri ofrece adjuntarla sin Ctrl+V
+  async function offerRecent() {
+    offer.classList.remove('show');
+    if (boxMode !== 'ask' || images.length || !api.recentImage) return;
+    const age = await api.recentImage();
+    if (age == null || !open || images.length) return;
+    offer.textContent = '📎 Tienes una captura de hace ' + Math.max(1, Math.round(age / 1000)) + ' s · clic para adjuntarla';
+    offer.classList.add('show');
+    placeBox();
+  }
+  offer.addEventListener('mousedown', async (e) => {
+    e.preventDefault();
+    offer.classList.remove('show');
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const t = item.types.find((x) => x.startsWith('image/'));
+        if (t) { addImageBlob(await item.getType(t)); return; }
+      }
+      say('Ya no la encuentro en el portapapeles. Pégala con Ctrl+V.', 3, { user: true });
+    } catch { say('No pude leer la captura. Pégala con Ctrl+V.', 3, { user: true }); }
+  });
+  input.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData ? e.clipboardData.items : [])].filter((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    if (!files.length) return; // texto normal: que se pegue como siempre
+    e.preventDefault();
+    for (const f of files) addImageBlob(f.getAsFile());
+  });
+
   function setDest(d) {
     dest = d;
     if (boxMode !== 'ask') return;
@@ -70,6 +126,8 @@
     nextDecision = T + 999;
     say(isKey ? 'Pásame la clave de Google AI Studio. No se la digo a nadie.' : R(P.ask), 2, { user: true });
     window.capriConvo.begin(); // mientras escribes, nadie interrumpe
+    clearImages();
+    if (!isKey) offerRecent();
   }
   function hideBox() {
     if (!open) return;
@@ -77,6 +135,7 @@
     window.capriConvo.end();
     box.classList.remove('show');
     input.blur();
+    clearImages();
     api.focusInput(false);
     if (window.capriResyncIgnore) window.capriResyncIgnore(); // que la ventana vuelva a atrapar clics sobre Capri
     if (pet.mode === 'look') setMode('idle');
@@ -97,11 +156,16 @@
     }
     if (e.key === 'Enter') {
       const text = input.value.trim();
-      const mode = boxMode, to = dest;
+      const mode = boxMode, to = dest, imgs = images.slice();
+      // las imágenes son para Claude / Antigravity: en modo Capri no se cierra el cuadro
+      if (mode === 'ask' && imgs.length && to === 'capri') {
+        say('Las imágenes se las paso a Claude o a Antigravity. Cambia de modo con Tab.', 3.5, { user: true });
+        return;
+      }
       input.value = '';
       hideBox();
       if (mode === 'key') submitKey(text);
-      else if (text && to !== 'capri') toClaude(to, text);
+      else if ((text || imgs.length) && to !== 'capri') toClaude(to, text, imgs);
       else if (text) handle(text);
     }
   });
@@ -290,7 +354,7 @@
   }
   let claudeBusy = false;
   // target: 'chat' | 'code' (app de Claude) | 'ag' (Antigravity)
-  async function toClaude(target, text) {
+  async function toClaude(target, text, imgs = []) {
     lastInteract = Date.now();
     const isAg = target === 'ag';
     const name = isAg ? 'Antigravity' : target === 'code' ? 'Claude Code' : 'Claude';
@@ -302,7 +366,7 @@
     if (fresh) {
       await api.claudeReset(target);
       text = (fresh[1] || '').trim();
-      if (!text) {
+      if (!text && !imgs.length) {
         const msg = isAg ? 'Va. Lo siguiente en CAPRI AG abre una conversación nueva.' : target === 'code' ? 'Va. Lo siguiente en CAPRI CODE abre una sesión nueva.' : 'Va. Lo siguiente que me pases abre un chat nuevo con Claude.';
         say(msg, 3, { badge: BG, user: true }); return;
       }
@@ -311,8 +375,10 @@
     window.capriConvo.begin();
     try {
       pet.glitch = 0.35;
-      say(pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: BG, user: true });
-      const r = isAg ? await api.agSend(text) : await api.claudeSend(target, text);
+      const what = imgs.length ? (text ? 'tu mensaje con ' : '') + (imgs.length > 1 ? imgs.length + ' imágenes' : 'la imagen') : '';
+      say(imgs.length ? 'Va, le paso ' + what + ' a ' + name + '.'
+        : pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: BG, user: true });
+      const r = isAg ? await api.agSend(text, imgs) : await api.claudeSend(target, text, imgs);
       if (!r || !r.ok) {
         const why = r && r.error === 'empty' ? 'No escribiste nada, choom.'
           : r && r.error === 'notinstalled' ? 'No encontré Antigravity instalado en tu compu.'
@@ -336,7 +402,7 @@
       else if (r.result === 'focused') say('Te lo dejé escrito en ' + name + '. Tú le das Enter.', 3, { badge: BG, user: true });
       else if (r.result === 'nofocus') say(name + ' no se dejó traer al frente. Tu texto quedó escrito ahí; dale Enter tú.', 4, { badge: BG, user: true });
       else if (r.result === 'noapp') say(name + ' no terminó de abrir. Intenta otra vez en un ratito.', 3.5, { badge: BG, user: true });
-      else if (r.result === 'dry') say('(prueba ' + (r.mode === 'continue' ? 'mismo chat' : 'nuevo') + ') ' + name + ' ← ' + text.slice(0, 60), 3, { badge: BG, user: true });
+      else if (r.result === 'dry') say('(prueba ' + (r.mode === 'continue' ? 'mismo chat' : 'nuevo') + ') ' + name + ' ← ' + text.slice(0, 60) + (imgs.length ? ' + ' + imgs.length + ' img' : ''), 3, { badge: BG, user: true });
       else say('Algo raro pasó con ' + name + '. Revisa si tu texto quedó ahí.', 3.5, { badge: BG, user: true });
     } finally {
       claudeBusy = false;
@@ -554,6 +620,13 @@
         if (it) it.dispatchEvent(new MouseEvent('mouseenter')); return;
       }
       if (c.startsWith('__prompt:')) { window.capriTestPrompt(c.slice(9)); return; } // panel de avisos de Claude
+      if (c === '__status') { window.capriTestStatus(); return; } // línea de "qué está haciendo"
+      if (c === '__img') { // una imagen de prueba en el cuadro (como si la pegaras)
+        const cv = document.createElement('canvas'); cv.width = 120; cv.height = 80;
+        const g = cv.getContext('2d'); g.fillStyle = '#ff2368'; g.fillRect(0, 0, 120, 80); g.fillStyle = '#27f59b'; g.fillRect(20, 20, 40, 40);
+        cv.toBlob((b) => addImageBlob(b), 'image/png'); return;
+      }
+      if (c === '__offer') { offer.dispatchEvent(new MouseEvent('mousedown', { cancelable: true })); setTimeout(() => console.log('IMGS>', images.length), 800); return; }
       if (c.startsWith('__pclick:')) { // clic en un botón del panel de avisos
         const it = [...document.querySelectorAll('.cp-btn')].find((e) => e.textContent.includes(c.slice(9)));
         if (it) it.click(); return;

@@ -15,6 +15,7 @@ const { shell, clipboard } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { psPasteBlock, saveText } = require('./images');
 
 const MAX = 14000; // la app recorta a ~14k caracteres
 
@@ -87,7 +88,10 @@ async function findNewCodeSession(since, waitMs = 20000) {
 // ---------------------------------------------------------------- teclas
 // keys: 'enter' (el texto ya está escrito) | 'paste' (Ctrl+V y luego Enter)
 // pull: traer Claude al frente desde el principio (cuando no se abrió ningún link)
-function focusAndType({ timeout, settle, keys, enter, minimize, pull }) {
+// images: rutas de imágenes a pegar antes del texto · textFile: el texto (en modo 'paste' con imágenes)
+function focusAndType({ timeout, settle, keys, enter, minimize, pull, images = [], textFile = '' }) {
+  const withImgs = images.length > 0;
+  timeout += images.length * 3;
   const ps = `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -Name F -Namespace W -MemberDefinition @'
@@ -140,7 +144,12 @@ $win = [W.F]::GetForegroundWindow()
 $fp = FocusPrompt $win
 "prompt:$fp"
 if ((Fg) -ne 'claude') { 'nofocus'; exit }
-if (${keys === 'paste' ? '$true' : '$false'}) {
+if (${withImgs ? '$true' : '$false'}) {
+  # primero las imágenes (una por una) y luego el texto si va pegado
+  if ($fp -eq 'noprompt') { 'noprompt'; exit }
+  ${withImgs ? psPasteBlock(images, keys === 'paste' ? textFile : '') : ''}
+  if ((Fg) -ne 'claude') { 'nofocus'; exit }
+} elseif (${keys === 'paste' ? '$true' : '$false'}) {
   if ($fp -eq 'noprompt') { 'noprompt'; exit }
   [W.F]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); Key 0x56; [W.F]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 500
@@ -151,7 +160,7 @@ if (${enter ? '$true' : '$false'}) {
   if (${minimize ? '$true' : '$false'}) { Start-Sleep -Milliseconds 1200; [void][W.F]::ShowWindow($win, 6); 'sent-min' } else { 'sent' }
 } else { 'focused' }
 `;
-  return new Promise((res) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
+  return new Promise((res) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps],
     { windowsHide: true, timeout: (timeout + 15) * 1000 },
     (err, out) => {
       const lines = String(out || '').trim().split(/\s+/);
@@ -192,36 +201,41 @@ async function withClipboard(text, fn) {
 // target: 'chat' | 'code' · opts.minimize: minimizar Claude después del Enter (opción "Ventanas")
 async function send(target, text, config, opts = {}) {
   const q = String(text || '').trim().slice(0, MAX);
-  if (!q) return { ok: false, error: 'empty' };
+  const imgs = Array.isArray(opts.images) ? opts.images : [];
+  if (!q && !imgs.length) return { ok: false, error: 'empty' };
   const enter = config.claudeDarEnter !== false;
-  const truncated = String(text).trim().length > MAX;
+  const truncated = String(text || '').trim().length > MAX;
   const cont = target === 'code' ? !!convo.code : convo.chat;
   const dry = !!process.env.CAPRI_CLAUDE_DRY;
   const warm = dry ? true : await isRunning();
 
   // seguir en la misma conversación
   if (cont && (warm || target === 'code')) {
-    if (dry) { console.log('[claude dry] continuar', target, target === 'code' ? convo.code : '(chat abierto)', JSON.stringify(q)); return { ok: true, result: 'dry', mode: 'continue', title: codeTitle }; }
+    if (dry) { console.log('[claude dry] continuar', target, target === 'code' ? convo.code : '(chat abierto)', JSON.stringify(q), 'imagenes=' + imgs.length); return { ok: true, result: 'dry', mode: 'continue', title: codeTitle }; }
     let pull = true;
     if (target === 'code') {
       try { await shell.openExternal('claude://code/continue?session=' + encodeURIComponent(convo.code)); pull = false; }
       catch (e) { return { ok: false, error: 'open', detail: String(e && e.message || e) }; }
     }
-    log(`continuar ${target} ${target === 'code' ? convo.code : ''} (${q.length} letras)`);
+    log(`continuar ${target} ${target === 'code' ? convo.code : ''} (${q.length} letras${imgs.length ? ', ' + imgs.length + ' imágenes' : ''})`);
     // tras abrir la sesión, darle tiempo a que cargue antes de buscar la caja de escribir
-    const result = await withClipboard(q, () => focusAndType({ timeout: warm ? 12 : 40, settle: warm ? (pull ? 600 : 2200) : 5000, keys: 'paste', enter, minimize: !!opts.minimize, pull }));
+    const textFile = imgs.length ? saveText(q) : '';
+    const result = await withClipboard(q, () => focusAndType({ timeout: warm ? 12 : 40, settle: warm ? (pull ? 600 : 2200) : 5000, keys: 'paste', enter, minimize: !!opts.minimize, pull, images: imgs, textFile }));
+    if (textFile) fs.unlink(textFile, () => {});
     return { ok: result !== 'error', result, mode: 'continue', title: target === 'code' ? codeTitle : '', minimized: result === 'sent' && !!opts.minimize, truncated };
   }
 
   // conversación nueva
   const url = buildNewUrl(target, q, config);
-  if (dry) { console.log('[claude dry] nueva', url, 'enter=' + enter, 'minimize=' + !!opts.minimize); mark(target, null); return { ok: true, result: 'dry', mode: 'new' }; }
+  if (dry) { console.log('[claude dry] nueva', url, 'enter=' + enter, 'minimize=' + !!opts.minimize, 'imagenes=' + imgs.length); mark(target, null); return { ok: true, result: 'dry', mode: 'new' }; }
   const since = Date.now();
-  log(`nueva ${target} (${q.length} letras) app ${warm ? 'abierta' : 'cerrada'}`);
+  log(`nueva ${target} (${q.length} letras${imgs.length ? ', ' + imgs.length + ' imágenes' : ''}) app ${warm ? 'abierta' : 'cerrada'}`);
   try { await shell.openExternal(url); }
   catch (e) { return { ok: false, error: 'open', detail: String(e && e.message || e) }; }
-  // en frío la app tarda en cargar la conversación: esperamos más antes del Enter
-  const result = await focusAndType({ timeout: warm ? 12 : 40, settle: warm ? 1800 : 5000, keys: 'enter', enter, minimize: !!opts.minimize });
+  // en frío la app tarda en cargar la conversación: esperamos más antes del Enter.
+  // El texto ya viene en el link; las imágenes se pegan encima antes del Enter.
+  const type = () => focusAndType({ timeout: warm ? 12 : 40, settle: warm ? 1800 : 5000, keys: 'enter', enter, minimize: !!opts.minimize, images: imgs });
+  const result = imgs.length ? await withClipboard('', type) : await type();
   if (result !== 'error') {
     if (target === 'code') { const s = await findNewCodeSession(since); mark('code', s); log('sesión nueva: ' + (s ? s.id : 'no encontrada, uso la última')); }
     else mark('chat');

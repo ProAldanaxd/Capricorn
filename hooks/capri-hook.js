@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 'use strict';
-// Lo corre Claude Code (hooks en ~/.claude/settings.json): le pasa el aviso a Capri
-// y regresa lo que tú elijas. Si Capri no está abierta o no contesta, no imprime nada
-// y Claude Code sigue como siempre.
+// Lo corren Claude Code y Antigravity (sus hooks) para pasarle a Capri lo que está pasando
+// y regresar lo que tú elijas.
+//   Claude Code:  node capri-hook.js
+//   Antigravity:  node capri-hook.js ag pre|post|stop
+// Si Capri no está abierta o no contesta, regresa la respuesta "neutral" y todo sigue normal.
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+
+const [src, ev] = process.argv.slice(2);
+const isAg = src === 'ag';
+// lo que se imprime si Capri no contesta (Antigravity pide "decision" en PreToolUse)
+const NEUTRAL = isAg ? (ev === 'pre' ? '{"decision":"allow"}' : '{}') : '';
 
 const LIMIT = 110 * 1000;
 let finished = false;
 function done(out) {
   if (finished) return;
   finished = true;
-  if (out) process.stdout.write(out);
+  const o = out || NEUTRAL;
+  if (o) process.stdout.write(o);
   process.exit(0);
 }
 setTimeout(() => done(''), LIMIT + 2000);
@@ -25,7 +33,8 @@ process.stdin.on('end', () => {
   try { info = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA || '', 'capricorn', 'hooks.json'), 'utf8')); }
   catch { return done(''); }
   const req = http.request({
-    host: '127.0.0.1', port: info.port, path: '/hook', method: 'POST', timeout: LIMIT,
+    host: '127.0.0.1', port: info.port, method: 'POST', timeout: LIMIT,
+    path: isAg ? '/hook?src=ag&ev=' + encodeURIComponent(ev || '') : '/hook',
     headers: { 'content-type': 'application/json', 'x-capri-token': info.token },
   }, (res) => {
     let body = '';

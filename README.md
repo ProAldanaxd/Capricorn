@@ -135,6 +135,26 @@ Igual que con Claude, pero con la app de escritorio de **Antigravity**:
 - `carpetaClaudeCode` fija la carpeta del proyecto para Claude Code (vacío = la que elija la app).
 - Si Claude estaba cerrada espera unos segundos más a que cargue antes del Enter.
 
+### Pasarles imágenes
+
+En los modos `CAPRI` naranja, `CAPRI CODE` y `CAPRI AG` puedes mandar imágenes junto con tu
+mensaje (o solas):
+
+1. Toma una captura (`Win+Shift+S`) o copia una imagen.
+2. Abre el cuadro (`Ctrl+Alt+C`) y pégala con **Ctrl+V**: sale una miniatura (✕ para quitarla).
+   Hasta 4 por mensaje.
+   - Si copiaste una imagen hace menos de un minuto, Capri te ofrece *"📎 Tienes una captura
+     de hace X s · clic para adjuntarla"* para no tener que pegarla.
+3. Escribe tu pregunta (o nada) y Enter: Capri pega las imágenes en la caja de la app, una por
+   una, luego tu texto, y lo envía como **un solo mensaje**.
+
+- En modo `CAPRI` (rosa) las imágenes no se mandan: Capri te pide que cambies de modo con Tab.
+- Capri no "ve" la imagen (su IA no la recibe); solo se la pasa a Claude o a Antigravity.
+- Usa el portapapeles: al final te regresa el **texto** que tenías copiado, pero no una imagen.
+- Las imágenes se guardan un momento en la carpeta temporal de Windows y se borran solas.
+- Lo de "captura reciente" usa el vigilante de apps (`reaccionarAApps`): solo detecta *que* se
+  copió una imagen, no la lee hasta que le das clic.
+
 ### Permisos y preguntas de Claude Code
 
 Cuando Claude Code te pide **permiso** para usar una herramienta, te hace una **pregunta** con
@@ -146,12 +166,30 @@ opciones o te deja **botones de respuesta** (como "Sí, hazlo"), Capri te lo ens
 - Si no contestas en ~100 s, o si estás viendo Claude en ese momento, todo sigue en Claude como siempre.
 - Capri **nunca** aprueba nada sola: solo pasa tu clic.
 
-Funciona con hooks de Claude Code en `%USERPROFILE%\.claude\settings.json` (`PermissionRequest` y
-`PreToolUse` de `AskUserQuestion` y `mcp__ccd_turn__wrap_up`), que corren
-[`hooks/capri-hook.js`](hooks/capri-hook.js). Ese script habla con Capri por un servidor local
-(solo `127.0.0.1`, con un token en `%APPDATA%\capricorn\hooks.json`). Si Capri está cerrada no hace
-nada. Para quitarlo, borra la sección `"hooks"` de ese `settings.json`
+Funciona con hooks de Claude Code en `%USERPROFILE%\.claude\settings.json` (`PermissionRequest`,
+`PreToolUse` y `Stop`), que corren [`hooks/capri-hook.js`](hooks/capri-hook.js). Ese script habla
+con Capri por un servidor local (solo `127.0.0.1`, con un token en `%APPDATA%\capricorn\hooks.json`).
+Si Capri está cerrada no hace nada. Para quitarlo, borra la sección `"hooks"` de ese `settings.json`
 (hay una copia de antes en `settings.json.antes-de-capri.bak`). Lo que pasa queda en `claude.log`.
+
+### Permisos de Antigravity
+
+Lo mismo con la app de Antigravity, con hooks en `%USERPROFILE%\.gemini\config\hooks.json`
+(también se ven en Settings > Customizations > Hooks; el hook se llama `capri`):
+
+- **Comandos y escribir/editar archivos:** Permitir, Negar o En Antigravity. Leer y buscar pasan
+  directo. Ojo: Capri pregunta por *cada* comando, aunque Antigravity lo fuera a correr solo.
+- **Preguntas** de Antigravity: Capri te avisa y te enseña la pregunta, pero se contesta en
+  Antigravity (botón "Ir a Antigravity").
+- **Cuando acaba**, si no lo estás viendo, Capri te dice "Antigravity ya acabó".
+- Si no contestas en ~90 s, si estás viendo Antigravity o si Capri está cerrada, sigue como siempre.
+- Para quitarlo, borra ese `hooks.json` (o apaga el hook `capri` en Settings).
+
+### Qué están haciendo
+
+Mientras Claude Code o Antigravity trabajan, debajo de Capri sale una línea por app con lo último
+que hicieron: *CLAUDE · Capri › editando main.js*, *AG · Mi web › leyendo config.json*… Se quita
+cuando terminan (o tras 90 s sin noticias). Sale de los mismos hooks.
 
 ### Acciones bloqueadas
 
@@ -249,6 +287,7 @@ powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloque
 ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
 claude.js        Le pasa texto a la app de Claude (chat o Claude Code) y le da Enter.
 antigravity.js   Lo mismo con la app de Antigravity (por sus botones, vía accesibilidad).
+images.js        Imágenes pegadas en el cuadro: las guarda un momento y las pega en Claude/Antigravity.
 hooks.js         Recibe permisos, preguntas y botones de Claude Code (servidor local).
 hooks/           capri-hook.js: el script que corre Claude Code y le pasa todo a Capri.
 prompts.js       El panel con botones para contestarle a Claude Code desde Capri.

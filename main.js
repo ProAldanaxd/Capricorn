@@ -10,6 +10,9 @@ const ai = require('./ai');
 const claude = require('./claude');
 const antigravity = require('./antigravity');
 const hooks = require('./hooks');
+const images = require('./images');
+// portapapeles: cuándo se copió la última imagen (para ofrecer adjuntar la captura recién tomada)
+const clip = { imageAt: 0, ownUntil: 0 };
 
 // ---------- configuración (config.json, editable a mano) ----------
 const DEFAULT_CONFIG = {
@@ -317,8 +320,23 @@ function createWindow() {
     if (target === 'ag') antigravity.reset(); else claude.reset(target === 'code' ? 'code' : 'chat');
     return true;
   });
-  ipcMain.handle('ag-send', (_e, text) => antigravity.safeSend(text, config, { minimize: !!aiState.ventanas }));
-  ipcMain.handle('claude-send', (_e, target, text) => claude.safeSend(target === 'code' ? 'code' : 'chat', text, config, { minimize: !!aiState.ventanas }));
+  // con imágenes: se guardan un momento en la carpeta temporal y se pegan antes del texto.
+  // Mientras Capri usa el portapapeles, lo que copie ella no cuenta como "captura nueva".
+  const withImages = async (imgs, fn) => {
+    const files = images.saveTemp(imgs);
+    if (files.length) clip.ownUntil = Date.now() + 120000;
+    try { return await fn(files); }
+    finally { if (files.length) { clip.ownUntil = Date.now() + 3000; images.cleanup(files); } }
+  };
+  ipcMain.handle('ag-send', (_e, text, imgs) => withImages(imgs, (files) =>
+    antigravity.safeSend(text, config, { minimize: !!aiState.ventanas, images: files })));
+  ipcMain.handle('claude-send', (_e, target, text, imgs) => withImages(imgs, (files) =>
+    claude.safeSend(target === 'code' ? 'code' : 'chat', text, config, { minimize: !!aiState.ventanas, images: files })));
+  // ¿se copió una imagen hace menos de un minuto? (la avisa watcher.ps1)
+  ipcMain.handle('recent-image', () => {
+    const age = Date.now() - clip.imageAt;
+    return clip.imageAt && age < 60000 ? age : null;
+  });
 
   // ---------- IA: proveedores y trabajos ----------
   ipcMain.handle('ai-status', () => aiInfo());
@@ -361,7 +379,7 @@ function createWindow() {
     const watcher = apps.startWatcher(__dirname, (info) => {
       env.app = info;
       if (win && !win.isDestroyed()) win.webContents.send('app', info);
-    });
+    }, (kind) => { if (kind === 'image' && Date.now() > clip.ownUntil) clip.imageAt = Date.now(); });
     app.on('before-quit', () => watcher.stop());
   }
 
@@ -444,11 +462,26 @@ app.whenReady().then(() => {
   aiState = ai.loadState(config);
   createWindow();
   // permisos, preguntas y botones de Claude Code -> Capri (ver hooks.js)
+  // nombres de sesiones/conversaciones, guardados un rato (los hooks llegan en cada herramienta)
+  const titles = new Map(); // 'src:id' -> { t, at }
+  const sessionTitle = (src, id) => {
+    if (!id) return '';
+    const k = src + ':' + id, c = titles.get(k);
+    if (c && Date.now() - c.at < (c.t ? 10 * 60000 : 30000)) return c.t;
+    let t = '';
+    try {
+      if (src === 'ag') { const x = antigravity.listConversations(200).find((r) => r.id === id); t = x ? x.title : ''; }
+      else { const s = claude.sessionByCli(id); t = s ? s.title : ''; }
+    } catch { /* sin acceso */ }
+    titles.set(k, { t, at: Date.now() });
+    return t;
+  };
   hooks.start({
     userData: app.getPath('userData'),
     getWin: () => win,
-    isClaudeFront: () => !!(env.app && env.app.id === 'claude'),
-    sessionTitle: (cli) => { const s = claude.sessionByCli(cli); return s ? s.title : ''; },
+    isFront: (id) => !!(env.app && env.app.id === id),
+    sessionTitle,
+    onAgFocus: () => antigravity.bringToFront(),
     onReply: async (cli, label) => {
       const s = claude.sessionByCli(cli);
       if (!s) { send('hook-reply:nosession'); return; }

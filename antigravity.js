@@ -18,6 +18,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { withClipboard, log } = require('./claude');
+const { psPasteBlock, saveText } = require('./images');
 
 const EXE = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'Antigravity.exe');
 const DB = path.join(process.env.USERPROFILE || '', '.gemini', 'antigravity', 'conversation_summaries.db');
@@ -54,7 +55,9 @@ async function findNewConversation(since, waitMs = 15000) {
 
 // ---------------------------------------------------------------- el script de teclas
 const psq = (s) => "'" + String(s || '').replace(/'/g, "''") + "'"; // texto literal para PowerShell
-function drive({ newConvo, pickTitle, enter, minimize }) {
+// images: rutas de imágenes a pegar antes del texto · textFile: el texto (cuando hay imágenes)
+function drive({ newConvo, pickTitle, enter, minimize, images = [], textFile = '' }) {
+  const withImgs = images.length > 0;
   const ps = `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -Name F -Namespace W -MemberDefinition @'
@@ -114,8 +117,14 @@ if (-not $box) { 'nobox'; exit }
 try { $box.SetFocus() } catch { }
 Start-Sleep -Milliseconds 250
 if ((Fg) -ne 'Antigravity') { 'nofocus'; exit }
-[W.F]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); Key 0x56; [W.F]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
-Start-Sleep -Milliseconds 500
+if (${withImgs ? '$true' : '$false'}) {
+  # primero las imágenes (una por una) y luego el texto
+  ${withImgs ? psPasteBlock(images, textFile) : ''}
+  if ((Fg) -ne 'Antigravity') { 'nofocus'; exit }
+} else {
+  [W.F]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); Key 0x56; [W.F]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 500
+}
 
 # 4) enviar
 if (${enter ? '$true' : '$false'}) {
@@ -125,8 +134,8 @@ if (${enter ? '$true' : '$false'}) {
   if (${minimize ? '$true' : '$false'}) { Start-Sleep -Milliseconds 1200; [void][W.F]::ShowWindow($h, 6); 'sent-min' } else { 'sent' }
 } else { 'focused' }
 `;
-  return new Promise((res) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
-    { windowsHide: true, timeout: 120000 },
+  return new Promise((res) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps],
+    { windowsHide: true, timeout: 120000 + images.length * 5000 },
     (err, out) => {
       const lines = String(out || '').trim().split(/\s+/).filter(Boolean);
       const s = lines.pop() || '';
@@ -139,20 +148,23 @@ if (${enter ? '$true' : '$false'}) {
 // ---------------------------------------------------------------- enviar
 async function send(text, config, opts = {}) {
   const q = String(text || '').trim().slice(0, MAX);
-  if (!q) return { ok: false, error: 'empty' };
+  const imgs = Array.isArray(opts.images) ? opts.images : [];
+  if (!q && !imgs.length) return { ok: false, error: 'empty' };
   if (!installed()) return { ok: false, error: 'notinstalled' };
   const enter = config.claudeDarEnter !== false;
   const fresh = !convo.started;
   const pickTitle = !fresh && convo.title ? convo.title : '';
   if (process.env.CAPRI_CLAUDE_DRY) {
-    console.log('[antigravity dry]', fresh ? 'nueva' : 'continuar', JSON.stringify(pickTitle), JSON.stringify(q), 'minimize=' + !!opts.minimize);
+    console.log('[antigravity dry]', fresh ? 'nueva' : 'continuar', JSON.stringify(pickTitle), JSON.stringify(q), 'minimize=' + !!opts.minimize, 'imagenes=' + imgs.length);
     if (fresh) { convo.started = true; convo.title = ''; }
     return { ok: true, result: 'dry', mode: fresh ? 'new' : 'continue', title: convo.title };
   }
-  log(`antigravity: ${fresh ? 'nueva' : 'continuar'} (${q.length} letras)${pickTitle ? ' en "' + pickTitle.slice(0, 40) + '"' : ''}`);
+  log(`antigravity: ${fresh ? 'nueva' : 'continuar'} (${q.length} letras${imgs.length ? ', ' + imgs.length + ' imágenes' : ''})${pickTitle ? ' en "' + pickTitle.slice(0, 40) + '"' : ''}`);
   const since = Date.now();
   let info = null;
-  const r = await withClipboard(q, async () => { info = await drive({ newConvo: fresh, pickTitle, enter, minimize: !!opts.minimize }); return info.result; });
+  const textFile = imgs.length ? saveText(q) : '';
+  const r = await withClipboard(q, async () => { info = await drive({ newConvo: fresh, pickTitle, enter, minimize: !!opts.minimize, images: imgs, textFile }); return info.result; });
+  if (textFile) fs.unlink(textFile, () => {});
   if (!info) info = { result: r };
   if (info.result === 'sent' && fresh) {
     convo.started = true;
@@ -172,4 +184,20 @@ function reset() { convo.started = false; convo.id = null; convo.title = ''; }
 function pick(id, title) { convo.started = true; convo.id = id; convo.title = title || ''; }
 function current() { return { ...convo }; }
 
-module.exports = { safeSend, reset, pick, current, listConversations, installed };
+// Traer Antigravity al frente (para contestarle algo que preguntó)
+function bringToFront() {
+  const ps = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -Name F -Namespace W -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c);
+[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
+[DllImport("user32.dll")] public static extern void keybd_event(byte v, byte s, uint f, System.UIntPtr e);
+'@
+$h = (Get-Process Antigravity | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1).MainWindowHandle
+if ($h) { if ([W.F]::IsIconic($h)) { [void][W.F]::ShowWindow($h, 9) }; [W.F]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [W.F]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero); [void][W.F]::SetForegroundWindow($h) }
+`;
+  require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, timeout: 15000 }, () => {});
+}
+
+module.exports = { safeSend, reset, pick, current, listConversations, installed, bringToFront };

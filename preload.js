@@ -16,14 +16,19 @@ contextBridge.exposeInMainWorld('capri', {
   cmd: (action, arg) => ipcRenderer.invoke('cmd', action, arg),
   focusInput: (on) => ipcRenderer.send('focus-input', on),
   // pasarle texto a la app de Claude: target 'chat' | 'code'
-  claudeSend: (target, text) => ipcRenderer.invoke('claude-send', target, text),
+  // images: data URLs de las imágenes pegadas en el cuadro (opcional)
+  claudeSend: (target, text, images) => ipcRenderer.invoke('claude-send', target, text, images || []),
   claudeReset: (target) => ipcRenderer.invoke('claude-reset', target),
   // lo mismo con la app de Antigravity
-  agSend: (text) => ipcRenderer.invoke('ag-send', text),
+  agSend: (text, images) => ipcRenderer.invoke('ag-send', text, images || []),
+  // ¿hay una imagen recién copiada (Win+Shift+S)? -> milisegundos desde que se copió, o null
+  recentImage: () => ipcRenderer.invoke('recent-image'),
   // avisos de Claude Code (permisos, preguntas, botones): ver hooks.js
   onPrompt: (cb) => ipcRenderer.on('prompt', (_e, p) => cb(p)),
   onPromptClose: (cb) => ipcRenderer.on('prompt-close', (_e, id) => cb(id)),
   promptAnswer: (id, value) => ipcRenderer.send('prompt-answer', id, value),
+  // lo que están haciendo Claude Code / Antigravity (línea debajo de Capri)
+  onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
   onNotify:(cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
   // IA (Gemini): la clave y las llamadas viven en el proceso principal
   ai: {

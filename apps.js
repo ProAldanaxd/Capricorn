@@ -85,7 +85,8 @@ function classify(info, selfDir) {
 }
 
 // ---------- vigilante ----------
-function startWatcher(selfDir, onApp) {
+// onClip: se copió una imagen nueva al portapapeles
+function startWatcher(selfDir, onApp, onClip) {
   loadGames();
   let child = null, buf = '', stopped = false, lastId = '';
   const run = () => {
@@ -100,7 +101,9 @@ function startWatcher(selfDir, onApp) {
         const lineTxt = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!lineTxt) continue;
         try {
-          const c = classify(JSON.parse(lineTxt), selfDir);
+          const j = JSON.parse(lineTxt);
+          if (j.clip) { if (onClip) onClip(j.clip); continue; }
+          const c = classify(j, selfDir);
           const key = c.id + '|' + (c.game || '');
           if (c.id !== 'self' && key !== lastId) { lastId = key; onApp(c); }
         } catch { /* línea incompleta */ }
