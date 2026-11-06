@@ -1,4 +1,4 @@
-﻿// Capri - mascota de escritorio (fan-made)
+// Capri - mascota de escritorio (fan-made)
 // Ventana transparente del tamaño del área de trabajo, siempre encima y que deja
 // pasar los clics excepto cuando el cursor está sobre Capri.
 const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, powerMonitor, globalShortcut, shell } = require('electron');
@@ -9,8 +9,11 @@ const powers = require('./powers');
 const ai = require('./ai');
 const claude = require('./claude');
 const antigravity = require('./antigravity');
+const gemini = require('./gemini');
 const hooks = require('./hooks');
 const images = require('./images');
+const screenWatch = require('./screen');
+const recorder = require('./recorder');
 // portapapeles: cuándo se copió la última imagen (para ofrecer adjuntar la captura recién tomada)
 const clip = { imageAt: 0, ownUntil: 0 };
 
@@ -18,7 +21,7 @@ const clip = { imageAt: 0, ownUntil: 0 };
 const DEFAULT_CONFIG = {
   ciudad: 'Guadalajara', latitud: 20.6597, longitud: -103.3496, zonaHoraria: 'America/Mexico_City',
   clima: true, reaccionarAApps: true, esconderseEnJuegos: true, minutosParaRecordarDescanso: 120, minutosAFKParaDormir: 5,
-  avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', desbloquearAccionesPeligrosas: false,
+  avisos: true, atajoPedirleAlgo: 'Ctrl+Alt+C', atajoGrabar: 'Ctrl+Alt+R', atajoCaptura: 'Ctrl+Alt+S', desbloquearAccionesPeligrosas: false,
   ia: true, modeloIA: 'gemini-3.6-flash', comentariosIA: true, segundosEntreComentariosIA: 150, desbloquearComandos: false,
   ollama: true, modeloOllama: 'llama3.2:3b', segundosEntreComentariosOllama: 60,
   claudeDarEnter: true, carpetaClaudeCode: '',
@@ -28,6 +31,12 @@ try { config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(path.join(__di
 let aiState = null; // { ollama, modeloOllama, routes } — se carga cuando la app está lista (necesita userData)
 let ollamaOnline = false;
 let ollamaModelList = [];
+let ollamaVisionList = []; // los modelos instalados que entienden imágenes (para Ver pantalla)
+async function refreshOllamaModels() { ollamaModelList = await ai.ollamaModels(); ollamaVisionList = await ai.ollamaVisionModels(ollamaModelList); }
+// el modelo de visión que se usa: el elegido si está instalado; si no, el primero que haya
+const visionModel = () => (ollamaVisionList.includes(aiState.modeloVision) ? aiState.modeloVision : ollamaVisionList[0] || null);
+// ¿quien "ve" está listo? (Gemini con su clave, u Ollama encendido con un modelo de visión)
+const visionReady = () => (aiState.routes.vision === 'ollama' ? !!(aiState.ollama && ollamaOnline && visionModel()) : ai.hasKey());
 // ¿el proveedor está configurado y conectado? (la cuota la revisa ai.js)
 const available = (p) => (p === 'gemini' ? ai.hasKey() : p === 'ollama' ? !!(aiState && aiState.ollama && ollamaOnline) : false);
 const aiInfo = () => {
@@ -41,7 +50,7 @@ const aiInfo = () => {
 };
 async function setOllama(on) {
   aiState.ollama = on; ai.saveState(aiState);
-  if (on) { ollamaOnline = await ai.startOllama(); if (ollamaOnline) ollamaModelList = await ai.ollamaModels(); }
+  if (on) { ollamaOnline = await ai.startOllama(); if (ollamaOnline) await refreshOllamaModels(); }
   else { ai.stopOllama(); ollamaOnline = false; }
   pushAiState();
   return ollamaOnline;
@@ -68,6 +77,16 @@ let state = { following: false, sleeping: false, scale: 0.75, moving: true };
 
 function send(action) {
   if (win && !win.isDestroyed()) win.webContents.send('action', action);
+}
+// Mientras graba o ve tu pantalla, la ventana de Capri no sale en las capturas
+// (Windows la excluye; tú la sigues viendo normal).
+function updateCaptureHiding() {
+  if (!win || win.isDestroyed()) return;
+  try { win.setContentProtection(recorder.isOn() || screenWatch.isOn()); } catch { /* no soportado */ }
+}
+// Grabar pantalla: si está grabando, detiene; si no, la ventana te deja elegir la sección
+function toggleRecording() {
+  send(recorder.isOn() ? 'rec-stop' : 'rec-select'); // la que graba es la ventana (recording.js)
 }
 
 // ---------- menú "API Keys": arriba las conexiones, abajo qué IA hace cada trabajo ----------
@@ -103,6 +122,12 @@ function apiKeysMenu() {
             submenu: models.map((m) => ({ label: m, type: 'radio', checked: m === aiState.modeloOllama,
               click: () => { aiState.modeloOllama = m; ai.saveState(aiState); pushAiState(); send('ollama-model:' + m); } })),
           },
+          {
+            label: 'Modelo para ver pantalla', enabled: !!aiState.ollama,
+            submenu: ollamaVisionList.length ? ollamaVisionList.map((m) => ({ label: m, type: 'radio', checked: m === visionModel(),
+              click: () => { aiState.modeloVision = m; ai.saveState(aiState); send('vision-model:' + m); } }))
+              : [{ label: 'Ninguno instalado (ollama pull ' + aiState.modeloVision + ')', enabled: false }],
+          },
         ],
       },
       { type: 'separator' },
@@ -110,6 +135,15 @@ function apiKeysMenu() {
       job('comentarios', 'Comentarios espontáneos', {}, 'Ninguna'),
       job('platica', 'Plática', {}),
       job('herramientas', 'Herramientas', {}, 'Ninguna'),
+      // quién "ve" en Ver pantalla (sin "Ninguna": para ver hace falta alguien)
+      {
+        label: 'Ver pantalla',
+        submenu: [
+          { label: 'Gemini' + note('gemini'), type: 'radio', checked: aiState.routes.vision !== 'ollama', click: () => setRoute('vision', 'gemini') },
+          { label: 'Ollama (local' + (visionModel() ? ': ' + visionModel() : ', sin modelo de visión') + ')' + note('ollama'), type: 'radio',
+            checked: aiState.routes.vision === 'ollama', click: () => setRoute('vision', 'ollama') },
+        ],
+      },
     ],
   };
 }
@@ -163,6 +197,18 @@ function claudeMenu() {
   };
 }
 
+// Gemini en el navegador: chat nuevo (los chats viven en tu cuenta de Google, no se pueden listar)
+function geminiMenu() {
+  const cur = gemini.current();
+  return {
+    label: 'Gemini (navegador)',
+    submenu: [
+      { label: 'Chat nuevo', click: () => { gemini.reset(); send('gem-reset'); } },
+      { label: cur.url ? 'Chat actual: ' + cur.url.replace(/^https?:\/\//, '').slice(0, 40) : 'Sin chat todavía', enabled: false },
+    ],
+  };
+}
+
 // Antigravity: conversación nueva y elegir una de las guardadas
 function antigravityMenu() {
   const cur = antigravity.current();
@@ -193,7 +239,24 @@ function menuTemplate() {
     // después de enviarle algo a Claude, minimizar su ventana (apagado por defecto)
     { label: 'Ventanas', type: 'checkbox', checked: !!aiState.ventanas,
       click: () => { aiState.ventanas = !aiState.ventanas; ai.saveState(aiState); send('ventanas:' + (aiState.ventanas ? 'on' : 'off')); } },
+    {
+      label: 'Pantalla',
+      submenu: [
+        // captura de una sección (o toda la pantalla), directo a su cuadro de texto
+        { label: 'Tomar captura…', accelerator: config.atajoCaptura || 'Ctrl+Alt+S', click: () => send('shot-select') },
+        // grabar una sección (o toda la pantalla) y mandársela a Claude / Antigravity como hoja de cuadros
+        { label: recorder.isOn() ? 'Detener grabación' : 'Grabar pantalla…', accelerator: config.atajoGrabar || 'Ctrl+Alt+R', click: toggleRecording },
+        // Capri ve tu pantalla mientras está encendido; siempre arranca apagado
+        { label: 'Ver pantalla', type: 'checkbox', checked: screenWatch.isOn(),
+          click: () => {
+            if (screenWatch.isOn()) { screenWatch.stop(); send('screen:off'); return; }
+            if (!visionReady()) { send(aiState.routes.vision === 'ollama' ? (aiState.ollama && ollamaOnline ? 'screen:nomodel:' + aiState.modeloVision : 'screen:noollama') : 'screen:nokey'); return; }
+            screenWatch.start(); send('screen:on:' + (aiState.routes.vision === 'ollama' ? 'ollama' : 'gemini'));
+          } },
+      ],
+    },
     claudeMenu(),
+    geminiMenu(),
     antigravityMenu(),
     { type: 'separator' },
     apiKeysMenu(),
@@ -317,7 +380,7 @@ function createWindow() {
   ipcMain.handle('cmd', (_e, action, arg) => powers.run(action, arg, powersCtx()));
   // pasarle el texto a la app de Claude (chat o Claude Code) y darle Enter
   ipcMain.handle('claude-reset', (_e, target) => {
-    if (target === 'ag') antigravity.reset(); else claude.reset(target === 'code' ? 'code' : 'chat');
+    if (target === 'ag') antigravity.reset(); else if (target === 'gemini') gemini.reset(); else claude.reset(target === 'code' ? 'code' : 'chat');
     return true;
   });
   // con imágenes: se guardan un momento en la carpeta temporal y se pegan antes del texto.
@@ -330,6 +393,8 @@ function createWindow() {
   };
   ipcMain.handle('ag-send', (_e, text, imgs) => withImages(imgs, (files) =>
     antigravity.safeSend(text, config, { minimize: !!aiState.ventanas, images: files })));
+  ipcMain.handle('gem-send', (_e, text, imgs) => withImages(imgs, (files) =>
+    gemini.safeSend(text, config, { minimize: !!aiState.ventanas, images: files })));
   ipcMain.handle('claude-send', (_e, target, text, imgs) => withImages(imgs, (files) =>
     claude.safeSend(target === 'code' ? 'code' : 'chat', text, config, { minimize: !!aiState.ventanas, images: files })));
   // ¿se copió una imagen hace menos de un minuto? (la avisa watcher.ps1)
@@ -346,21 +411,23 @@ function createWindow() {
       config, state: aiState, available, powersCtx,
       express: (a) => { if (win && !win.isDestroyed()) win.webContents.send('express', a); },
     };
+    // viendo la pantalla: tu pregunta va con una foto nueva
+    if (kind === 'chat' && screenWatch.isOn()) { aenv.screen = await screenWatch.snapshot(); aenv.visionModel = visionModel(); }
     const r = kind === 'event' ? await ai.event(text, ctx, aenv) : await ai.chat(text, ctx, aenv);
     if (!r.ok && r.provider === 'ollama' && (r.error === 'network' || r.error === 'timeout')) ollamaOnline = await ai.ollamaUp(); // ¿se cayó?
     pushAiState();
     return r;
   });
-  ipcMain.on('ollama-unload', () => { if (aiState.ollama && ollamaOnline) ai.unloadOllama(aiState.modeloOllama); });
+  ipcMain.on('ollama-unload', () => { if (aiState.ollama && ollamaOnline) { ai.unloadOllama(aiState.modeloOllama); const v = visionModel(); if (v) ai.unloadOllama(v); } });
 
   // Ollama: encenderlo si está activado, y revisar cada minuto si sigue vivo
-  if (aiState.ollama) ai.startOllama().then(async (up) => { ollamaOnline = up; if (up) ollamaModelList = await ai.ollamaModels(); pushAiState(); });
+  if (aiState.ollama) ai.startOllama().then(async (up) => { ollamaOnline = up; if (up) await refreshOllamaModels(); pushAiState(); });
   win.webContents.on('did-finish-load', () => setTimeout(pushAiState, 500)); // la ventana tarda en cargar
   setInterval(async () => {
     pushAiState(); // refresca si un proveedor salió de su pausa por cuota
     if (!aiState.ollama) return;
     const up = await ai.ollamaUp();
-    if (up !== ollamaOnline) { ollamaOnline = up; if (up) ollamaModelList = await ai.ollamaModels(); pushAiState(); }
+    if (up !== ollamaOnline) { ollamaOnline = up; if (up) await refreshOllamaModels(); pushAiState(); } else if (up) await refreshOllamaModels(); // por si descargaste un modelo
   }, 60000);
   app.on('before-quit', () => ai.stopOllama());
   ipcMain.on('focus-input', (_e, on) => {
@@ -443,7 +510,8 @@ ipcMain.on('show-menu', (_e, s, x, y) => {
 });
 ipcMain.on('menu-click', (_e, id) => {
   const h = menuHandlers.get(id);
-  if (h) Promise.resolve().then(() => h()).catch(() => {});
+  if (process.env.CAPRI_DEBUG) console.log('[menú] clic', id, h ? 'ok' : 'sin handler');
+  if (h) Promise.resolve().then(() => h()).catch((e) => claude.log('menú: error ' + String(e && e.stack || e).slice(0, 300)));
 });
 // mientras el menú está abierto, la ventana atrapa todos los clics (para cerrarlo al hacer clic afuera)
 ipcMain.on('menu-open', (_e, open) => {
@@ -491,6 +559,31 @@ app.whenReady().then(() => {
     log: (m) => claude.log('[hooks] ' + m),
   });
   ipcMain.on('prompt-answer', (_e, id, value) => hooks.answer(id, value));
+  // "Ver pantalla" (ver screen.js)
+  const toWin = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
+  const inWin = (js) => (win && !win.isDestroyed() ? win.webContents.executeJavaScript(js, true) : Promise.resolve(null));
+  screenWatch.setup({
+    grab: (w) => inWin('window.capriScreenGrab(' + Number(w) + ')').catch(() => null),
+    release: () => { inWin('window.capriScreenRelease()').catch(() => {}); },
+    isPaused: () => !!(env.app && env.app.id === 'game'),
+    appName: () => (env.app ? env.app.id : ''),
+    canComment: () => config.comentariosIA !== false && aiState.routes.comentarios !== 'none' && visionReady(),
+    gapSec: () => Number(config.segundosEntreComentariosPantalla) || 180,
+    onStatus: (s) => { updateCaptureHiding(); toWin('screen', s); },
+    onComment: async (img) => {
+      const r = await ai.screenComment(img, {}, { config, state: aiState, available, visionModel: visionModel(), powersCtx: () => ({ config, win }), express: () => {} });
+      if (r.ok) toWin('screen-comment', r.text);
+      else if (r.error !== 'nada') claude.log('pantalla: comentario falló (' + r.error + ')');
+    },
+    log: (m) => claude.log(m),
+  });
+  app.on('before-quit', () => screenWatch.stop());
+  // "Grabar pantalla" (ver recorder.js). Mientras graba, la ventana de Capri no sale en las fotos.
+  // el permiso del stream de pantalla solo se da mientras graba o ve la pantalla
+  recorder.setup({ onChange: () => updateCaptureHiding(), allow: () => recorder.isOn() || screenWatch.isOn(), log: (m) => claude.log(m) });
+  // la ventana avisa cuándo empieza (para darle permiso del stream) y cuándo termina
+  ipcMain.handle('rec-start', (_e, kind) => recorder.start(kind));
+  ipcMain.on('rec-stop', (_e, info) => recorder.stop(info));
   app.on('before-quit', () => hooks.stop());
   tray = new Tray(trayIcon());
   tray.setToolTip('Capri');
@@ -498,6 +591,10 @@ app.whenReady().then(() => {
   tray.on('click', () => send('talk'));
   // Atajo global para pedirle algo desde cualquier app
   try { globalShortcut.register(config.atajoPedirleAlgo, () => send('ask')); } catch { /* atajo inválido u ocupado */ }
+  // grabar pantalla: el mismo atajo empieza (eliges la sección) y detiene
+  try { globalShortcut.register(config.atajoGrabar || 'Ctrl+Alt+R', toggleRecording); } catch { /* atajo inválido u ocupado */ }
+  // captura: eliges la sección y queda adjunta en su cuadro
+  try { globalShortcut.register(config.atajoCaptura || 'Ctrl+Alt+S', () => send('shot-select')); } catch { /* atajo inválido u ocupado */ }
 });
 
 app.on('window-all-closed', () => app.quit());

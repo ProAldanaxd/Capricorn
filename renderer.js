@@ -172,7 +172,7 @@ let bubQueue = [];
 const GLYPHS = '01#$%&@<>/\\|=+*';
 function setBubbleBadge(b) {
   bubbleBadge.textContent = b;
-  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : b === 'OLLAMA' ? ' ollama' : b === 'CLAUDE' ? ' claude' : b === 'AG' ? ' ag' : '');
+  bubbleBadge.className = 'badge' + (b === 'LOCAL' ? ' local' : b === 'OLLAMA' ? ' ollama' : b === 'CLAUDE' ? ' claude' : b === 'AG' || b === 'GEMINI' ? ' ag' : b === '● EN VIVO' ? ' live' : '');
 }
 function splitText(text, max = 150) {
   const t = String(text).replace(/\s+/g, ' ').trim();
@@ -362,7 +362,7 @@ let ignoring = true, ignoreSentAt = 0;
 // encima de Capri, los clics se irían al escritorio y no la podrías arrastrar.
 // Por eso se reconfirma cada segundo y justo después de cerrar el menú.
 function updateIgnore() {
-  const want = !(window.capriMenuOpen || down || hit(cur.x, cur.y) || (window.uiHit && window.uiHit(cur.x, cur.y)));
+  const want = !(window.capriMenuOpen || window.capriSelecting || down || hit(cur.x, cur.y) || (window.uiHit && window.uiHit(cur.x, cur.y)));
   const now = performance.now();
   if (want !== ignoring || now - ignoreSentAt > 1000) { ignoring = want; ignoreSentAt = now; api.setIgnore(want); }
 }

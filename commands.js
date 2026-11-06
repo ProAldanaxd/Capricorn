@@ -19,10 +19,10 @@
   const boxTag = document.getElementById('ask-tag');
   const boxHint = document.getElementById('ask-hint');
   let open = false, boxMode = 'ask';
-  // a quién va lo que escribes: Capri, el chat de Claude, Claude Code o Antigravity (Tab cambia)
-  const DESTS = ['capri', 'chat', 'code', 'ag'];
-  // chat y code van a la app de Claude (naranja), ag a Antigravity (azul); todos se muestran como Capri
-  const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://', ag: 'CAPRI AG://' };
+  // a quién va lo que escribes: Capri, el chat de Claude, Claude Code, Gemini (navegador) o Antigravity (Tab cambia)
+  const DESTS = ['capri', 'chat', 'code', 'gemini', 'ag'];
+  // chat y code van a la app de Claude (naranja); gemini y ag en azul; todos se muestran como Capri
+  const DEST_TAG = { capri: 'CAPRI://', chat: 'CAPRI://', code: 'CAPRI CODE://', gemini: 'CAPRI://', ag: 'CAPRI AG://' };
   let dest = 'capri';
 
   // ---- imágenes pegadas (Ctrl+V) para mandárselas a Claude / Antigravity junto con el texto
@@ -52,6 +52,18 @@
     r.readAsDataURL(blob);
   }
   function clearImages() { images = []; offer.classList.remove('show'); renderThumbs(); }
+  // abrir el cuadro con imágenes ya adjuntas (la grabación de pantalla). En modo Capri rosa
+  // las imágenes no se mandan, así que cambia a Claude.
+  // opts.append: si el cuadro ya está abierto, se suma a lo que ya tenías adjunto (capturas)
+  window.capriAttachImages = (list, note, opts = {}) => {
+    const keep = opts.append && open && boxMode === 'ask' ? images.slice() : [];
+    if (!open || boxMode !== 'ask') showBox('ask');
+    if (dest === 'capri') setDest('chat');
+    images = [...keep, ...list].slice(-MAX_IMGS);
+    renderThumbs();
+    if (note) say(note, 4, { user: true });
+    setTimeout(() => input.focus(), 80);
+  };
   // la captura recién copiada (Win+Shift+S): Capri ofrece adjuntarla sin Ctrl+V
   async function offerRecent() {
     offer.classList.remove('show');
@@ -86,7 +98,7 @@
     boxTag.textContent = DEST_TAG[d];
     boxHint.textContent = 'Enter para enviar · Tab cambia modo · Esc para cerrar';
     box.classList.toggle('to-claude', d === 'chat' || d === 'code');
-    box.classList.toggle('to-ag', d === 'ag');
+    box.classList.toggle('to-ag', d === 'ag' || d === 'gemini'); // Gemini (navegador) y Antigravity en azul
   }
 
   // El cuadro va ARRIBA del globo (sin encimarse). Si arriba no cabe, va debajo del globo.
@@ -173,6 +185,7 @@
   api.onAction((a) => {
     if (a === 'ask') (open ? hideBox() : showBox('ask'));
     else if (a === 'apikey') showBox('key');
+    else if (a === 'gem-reset') say('Va. Lo siguiente que le pases a Gemini abre un chat nuevo.', 3, { badge: 'GEMINI' });
     else if (a === 'ag-reset') say('Va. Lo siguiente en CAPRI AG abre una conversación nueva.', 3, { badge: 'AG' });
     else if (a.startsWith('ag-pick:')) say('Conectada a "' + a.slice(8) + '" en Antigravity. Lo que me pases en CAPRI AG va para allá.', 3.5, { badge: 'AG' });
     else if (a === 'claude-reset:chat') say('Va. Lo siguiente que me pases abre un chat nuevo con Claude.', 3, { badge: 'CLAUDE' });
@@ -180,6 +193,13 @@
     else if (a.startsWith('claude-pick:')) say('Conectada a "' + a.slice(12) + '". Lo que me pases en CAPRI CODE va para allá.', 3.5, { badge: 'CLAUDE' });
     else if (a === 'ventanas:on') say('Va: cuando le mande algo a una AI, minimizo su ventana.', 3, { badge: 'CLAUDE' });
     else if (a === 'ventanas:off') say('Ok, dejo a la AI al frente después de enviarle algo.', 3, { badge: 'CLAUDE' });
+    else if (a.startsWith('screen:on')) say(a.endsWith(':ollama') ? 'Va, ya veo tu pantalla, con mi IA local: nada sale de tu compu. Pregúntame lo que quieras.'
+      : 'Va, ya veo tu pantalla. Pregúntame lo que quieras.', 3.5, { badge: '● EN VIVO', user: true });
+    else if (a.startsWith('screen:nomodel:')) say('Para ver con Ollama me falta un modelo con visión. Descárgalo con: ollama pull ' + a.slice(15), 5, { user: true });
+    else if (a === 'screen:noollama') say('Para ver con Ollama necesito que esté encendido (API Keys → Configurar Ollama).', 4, { user: true });
+    else if (a.startsWith('vision-model:')) say('Ahora veo tu pantalla con ' + a.slice(13) + '.', 2.5, { badge: 'OLLAMA' });
+    else if (a === 'screen:off') say('Listo, dejé de ver tu pantalla.', 2.5, { user: true });
+    else if (a === 'screen:nokey') say('Para ver tu pantalla necesito Gemini. Ponle su API key en el menú.', 3.5, { user: true });
     else if (a === 'ai-reset') say('Listo, olvidé esta conversación. Lo de mi memoria sigue ahí.', 3);
     else if (a === 'ollama-on') say('Ollama en línea. Mi cerebro local está despierto.', 3, { badge: 'OLLAMA' });
     else if (a === 'ollama-off') say('Apagué Ollama. Lo que le tocaba lo hace la otra IA o mis frases.', 3.5);
@@ -187,6 +207,10 @@
     else if (a.startsWith('ollama-model:')) say('Ahora pienso con ' + a.slice(13) + '.', 2.5, { badge: 'OLLAMA' });
     else if (a.startsWith('route:')) {
       const [, job, p] = a.split(':');
+      if (job === 'vision') {
+        say(p === 'ollama' ? 'En "Ver pantalla" ahora veo con Ollama: tus capturas no salen de tu compu.' : 'En "Ver pantalla" ahora veo con Gemini.', 3.5, { badge: BADGE[p] });
+        return;
+      }
       const JOB = { comentarios: 'Mis comentarios', platica: 'La plática', herramientas: 'Las herramientas' };
       const WHO = { gemini: 'van con Gemini', ollama: 'van con Ollama', none: job === 'herramientas' ? 'van con mis reglas' : 'van con mis frases fijas' };
       let extra = '';
@@ -223,6 +247,8 @@
     return platica !== 'none' ? anyReady() : ready(herramientas);
   };
   const aiReady = chatPossible;
+  // con "Ver pantalla" encendido, las preguntas van a quien ve aunque la plática esté en "Ninguna"
+  const canAsk = () => chatPossible() || !!window.capriScreenOn;
   // etiqueta del globo: SYNC = Gemini, OLLAMA = IA local, LOCAL = reglas y frases fijas
   window.capriDefaultBadge = () => {
     const p = aiInfo.routes.platica;
@@ -325,7 +351,7 @@
     const res = await api.ai.ask('chat', raw, aiContext());
     think(false);
     if (pet.mode === 'look') setMode('idle');
-    if (res.ok) { say(res.text, 3.8, { badge: BADGE[res.provider] || 'SYNC', user: true }); return true; }
+    if (res.ok) { say(res.text, 3.8, { badge: res.screen ? '● EN VIVO' : BADGE[res.provider] || 'SYNC', user: true }); return true; }
     aiFailed(res);
     if (T - aiErrorToldAt > 600 && res.error !== 'off') { // avisar del problema, sin repetirlo a cada rato
       aiErrorToldAt = T;
@@ -344,6 +370,10 @@
     if (m) return ['code', m[1]];
     m = s.match(/^@claude\b[\s:,]*([\s\S]+)$/i);
     if (m) return ['chat', m[1]];
+    m = s.match(/^@(?:gemini|gem)\b[\s:,]*([\s\S]+)$/i);
+    if (m) return ['gemini', m[1]];
+    m = s.match(/^(?:dile|preg[uú]ntale|p[aá]sale|m[aá]ndale|p[ií]dele|escr[ií]bele)\s+a\s+gemini\b[\s:,]*(?:que\s+)?([\s\S]+)$/i);
+    if (m) return ['gemini', m[1]];
     m = s.match(/^@(?:ag|antigravity|agy)\b[\s:,]*([\s\S]+)$/i);
     if (m) return ['ag', m[1]];
     m = s.match(/^(?:dile|preg[uú]ntale|p[aá]sale|m[aá]ndale|p[ií]dele|escr[ií]bele)\s+a\s+antigravity\b[\s:,]*(?:que\s+)?([\s\S]+)$/i);
@@ -356,9 +386,9 @@
   // target: 'chat' | 'code' (app de Claude) | 'ag' (Antigravity)
   async function toClaude(target, text, imgs = []) {
     lastInteract = Date.now();
-    const isAg = target === 'ag';
-    const name = isAg ? 'Antigravity' : target === 'code' ? 'Claude Code' : 'Claude';
-    const BG = isAg ? 'AG' : 'CLAUDE';
+    const isAg = target === 'ag', isGem = target === 'gemini';
+    const name = isAg ? 'Antigravity' : isGem ? 'Gemini' : target === 'code' ? 'Claude Code' : 'Claude';
+    const BG = isAg ? 'AG' : isGem ? 'GEMINI' : 'CLAUDE';
     if (claudeBusy) { reply('Espérame, todavía le estoy pasando lo anterior a ' + name + '.', 3); return; }
     // "nuevo", "nuevo chat", "nueva sesión"... -> empezar otra conversación (con o sin texto)
     // ("nuevo" solo, o "nuevo chat: ...", "otra sesión ..."; "otra pregunta" NO cuenta)
@@ -367,7 +397,7 @@
       await api.claudeReset(target);
       text = (fresh[1] || '').trim();
       if (!text && !imgs.length) {
-        const msg = isAg ? 'Va. Lo siguiente en CAPRI AG abre una conversación nueva.' : target === 'code' ? 'Va. Lo siguiente en CAPRI CODE abre una sesión nueva.' : 'Va. Lo siguiente que me pases abre un chat nuevo con Claude.';
+        const msg = isAg ? 'Va. Lo siguiente en CAPRI AG abre una conversación nueva.' : isGem ? 'Va. Lo siguiente que le pases a Gemini abre un chat nuevo.' : target === 'code' ? 'Va. Lo siguiente en CAPRI CODE abre una sesión nueva.' : 'Va. Lo siguiente que me pases abre un chat nuevo con Claude.';
         say(msg, 3, { badge: BG, user: true }); return;
       }
     }
@@ -378,17 +408,17 @@
       const what = imgs.length ? (text ? 'tu mensaje con ' : '') + (imgs.length > 1 ? imgs.length + ' imágenes' : 'la imagen') : '';
       say(imgs.length ? 'Va, le paso ' + what + ' a ' + name + '.'
         : pick(['Va, se lo paso a ' + name + '.', 'Abriendo canal con ' + name + '…', 'Dame un segundo, lo mando a ' + name + '.']), 2.4, { badge: BG, user: true });
-      const r = isAg ? await api.agSend(text, imgs) : await api.claudeSend(target, text, imgs);
+      const r = isAg ? await api.agSend(text, imgs) : isGem ? await api.gemSend(text, imgs) : await api.claudeSend(target, text, imgs);
       if (!r || !r.ok) {
         const why = r && r.error === 'empty' ? 'No escribiste nada, choom.'
-          : r && r.error === 'notinstalled' ? 'No encontré Antigravity instalado en tu compu.'
+          : r && r.error === 'notinstalled' ? (isGem ? 'No encontré Opera GX en tu compu (lo uso para abrir Gemini).' : 'No encontré Antigravity instalado en tu compu.')
           : 'No pude abrir la app de ' + name + '. ¿Está instalada?';
         reply(why, 3.5);
         return;
       }
       // Antigravity siempre pega (igual que Claude al seguir en el mismo chat)
-      const pasted = isAg || r.mode === 'continue';
-      const where = r.pickFailed ? ' No encontré la conversación de antes; lo puse en la que estaba abierta.' : '';
+      const pasted = isAg || isGem || r.mode === 'continue';
+      const where = r.pickFailed ? ' No encontré la conversación de antes; lo puse en la que estaba abierta.' : r.reopened ? ' Su ventana ya no estaba, así que abrí el chat otra vez.' : '';
       if (pasted && r.result === 'nofocus') {
         say(name + ' no se dejó traer al frente. Te dejé el texto copiado: pégalo tú con Ctrl+V.', 4, { badge: BG, user: true });
         return;
@@ -418,10 +448,10 @@
     window.capriConvo.begin(); // hasta que te responda, ningún otro mensaje la interrumpe
     try {
       const rulesFirst = aiInfo.routes.herramientas === 'none';
-      if (!rulesFirst && chatPossible() && await askAi(raw)) return;
+      if (!rulesFirst && canAsk() && await askAi(raw)) return;
       const r = await handleRules(raw);
       if (r !== 'unknown') return;
-      if (rulesFirst && chatPossible() && await askAi(raw)) return;
+      if (rulesFirst && canAsk() && await askAi(raw)) return;
       pet.glitch = 0.4;
       reply(R(P.unknown), 4);
     } finally {
@@ -621,6 +651,9 @@
       }
       if (c.startsWith('__prompt:')) { window.capriTestPrompt(c.slice(9)); return; } // panel de avisos de Claude
       if (c === '__status') { window.capriTestStatus(); return; } // línea de "qué está haciendo"
+      if (c.startsWith('__recsel:')) { const [a, b, x, y] = c.slice(9).split(',').map(Number); window.capriRecTest.select(a, b, x, y); return; }
+      if (c.startsWith('__shotsel:')) { const [a, b, x, y] = c.slice(10).split(',').map(Number); window.capriRecTest.select(a, b, x, y, 'shot'); setTimeout(() => console.log('IMGS>', images.length, images.map((s) => Math.round(s.length * 0.75 / 1024) + 'KB').join(',')), 2500); return; }
+      if (c === '__recstop') { window.capriRecTest.stop(); return; }
       if (c === '__img') { // una imagen de prueba en el cuadro (como si la pegaras)
         const cv = document.createElement('canvas'); cv.width = 120; cv.height = 80;
         const g = cv.getContext('2d'); g.fillStyle = '#ff2368'; g.fillRect(0, 0, 120, 80); g.fillStyle = '#27f59b'; g.fillRect(20, 20, 40, 40);

@@ -40,6 +40,32 @@
     #bubble .badge.ag { color: #d6e6ff; background: rgba(66,133,244,.2); box-shadow: inset 0 0 0 1px rgba(66,133,244,.8); }
     #ask.to-ag .tag { color: #7fb0ff; text-shadow: 0 0 6px #4285f4; }
     #ask.to-ag input:focus { border-color: #4285f4; }
+    #bubble .badge.live { color: #ffd0e2; background: rgba(255,35,104,.18); box-shadow: inset 0 0 0 1px rgba(255,35,104,.65); }
+    /* "Ver pantalla": REC junto a su cabeza */
+    #capri-rec { position: fixed; left: 0; top: 0; display: none; pointer-events: none; z-index: 31; align-items: center; gap: 6px;
+      padding: 3px 9px 3px 7px; font: 11px Consolas, 'Cascadia Mono', monospace; letter-spacing: 2px; color: #ffd0e2;
+      background: rgba(14,6,26,.92); box-shadow: inset 0 0 0 1px rgba(255,35,104,.75); clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+    #capri-rec.show { display: inline-flex; }
+    #capri-rec.paused { color: #b7a9cc; box-shadow: inset 0 0 0 1px rgba(183,169,204,.5); }
+    #capri-rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff2368; animation: blink 1.2s steps(1) infinite; }
+    #capri-rec.paused .dot { background: #8c7fa3; animation: none; }
+    @keyframes blink { 50% { opacity: .2; } }
+    /* "Grabar pantalla": botón para detener y velo para elegir la sección */
+    #rec-stop { position: fixed; left: 0; top: 0; display: none; z-index: 32; align-items: center; gap: 7px; cursor: pointer;
+      padding: 4px 10px 4px 8px; font: 11px Consolas, 'Cascadia Mono', monospace; letter-spacing: 1px; color: #fff;
+      background: rgba(200,20,70,.92); box-shadow: inset 0 0 0 1px #ff5c8a; clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+    #rec-stop.show { display: inline-flex; }
+    #rec-stop:hover { background: rgba(230,30,85,.98); }
+    #rec-stop .sq { width: 9px; height: 9px; background: #fff; animation: blink 1.2s steps(1) infinite; }
+    #rec-select { position: fixed; inset: 0; display: none; z-index: 60; cursor: crosshair; background: rgba(10,4,20,.28); }
+    #rec-select.show { display: block; }
+    #rec-select .hint { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); padding: 7px 14px; font: 13px Consolas, monospace;
+      color: #ffe3ee; background: rgba(14,6,26,.95); box-shadow: inset 0 0 0 1px #ff2a6d; pointer-events: none; }
+    #rec-select .box { position: absolute; display: none; border: 2px solid #ff2a6d; background: rgba(255,42,109,.08);
+      box-shadow: 0 0 0 9999px rgba(10,4,20,.35); pointer-events: none; }
+    .cs-screen { box-shadow: inset 2px 0 0 #ff2368; }
+    .cs-screen .cs-who { color: #ffd0e2; background: rgba(255,35,104,.25); }
+    .cs-screen .cs-what::after { content: none; }
     #bubble.thinking .badge { animation: pulse 1s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity: .4; } }
     #bubble .msg { font-size: 17px; line-height: 1.3; white-space: pre-wrap; word-wrap: break-word; min-height: 22px; }
@@ -153,6 +179,9 @@
   </div>
   <div id="capri-menu"></div>
   <div id="capri-status"></div>
+  <div id="capri-rec"><span class="dot"></span><span class="txt">REC</span></div>
+  <div id="rec-stop"><span class="sq"></span><span class="txt">0:00</span></div>
+  <div id="rec-select"><div class="hint">Arrastra para elegir qué grabo · Enter = toda la pantalla · Esc = cancelar</div><div class="box"></div></div>
   <div id="capri-prompt"><div class="cm-slab"></div><div class="cm-body">
     <div class="cp-tag"></div><div class="cp-title"></div><div class="cp-detail"></div>
     <div class="cp-opts"></div><div class="cp-foot"></div>
@@ -170,5 +199,7 @@
   <script src="commands.js"></script>
   <script src="menu.js"></script>
   <script src="prompts.js"></script>
+  <script src="screencap.js"></script>
+  <script src="recording.js"></script>
 </body>
 </html>

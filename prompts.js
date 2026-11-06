@@ -180,10 +180,10 @@
   // Una línea por app: la última herramienta que usó. Se borra al terminar o tras 90 s sin noticias.
   const strip = document.getElementById('capri-status');
   const acts = new Map(); // 'src:key' -> { src, session, text, at }
-  const SRC = { claude: 'CLAUDE', ag: 'AG' };
+  const SRC = { claude: 'CLAUDE', ag: 'AG', screen: 'VIENDO' };
   function renderStrip() {
     const now = Date.now();
-    for (const [k, v] of acts) if (now - v.at > 90000) acts.delete(k);
+    for (const [k, v] of acts) if (v.src !== 'screen' && now - v.at > 90000) acts.delete(k);
     // la más reciente de cada app
     const per = new Map();
     for (const v of acts.values()) if (!per.has(v.src) || per.get(v.src).at < v.at) per.set(v.src, v);
@@ -192,7 +192,7 @@
       const line = document.createElement('div'); line.className = 'cs-line cs-' + v.src;
       const who = document.createElement('span'); who.className = 'cs-who'; who.textContent = SRC[v.src] || v.src;
       const what = document.createElement('span'); what.className = 'cs-what';
-      what.textContent = (v.session ? v.session + ' › ' : '') + v.text;
+      what.textContent = v.src === 'screen' ? screenText(v) : (v.session ? v.session + ' › ' : '') + v.text;
       line.append(who, what); strip.appendChild(line);
     }
     strip.classList.toggle('show', per.size > 0);
@@ -206,6 +206,36 @@
   }
   setInterval(placeStrip, 50);
   setInterval(renderStrip, 5000);
+
+  // ------------------------------------------------------------ "Ver pantalla": REC y línea VIENDO
+  const rec = document.getElementById('capri-rec');
+  const recTxt = rec.querySelector('.txt');
+  function screenText(v) {
+    if (v.paused) return 'en pausa (estás jugando)';
+    const name = (window.capriAppName && window.capriAppName({ id: v.app })) || 'tu pantalla';
+    const s = v.at ? Math.max(0, Math.round((Date.now() - v.at) / 1000)) : 0;
+    return name + ' · hace ' + s + ' s';
+  }
+  function placeRec() {
+    if (!rec.classList.contains('show')) return;
+    rec.style.visibility = pet.mode === 'hidden' ? 'hidden' : '';
+    const hw = headWorld();
+    const left = clamp(hw.x + EXT.side * S * 0.45, 8, W - rec.offsetWidth - 8), top = clamp(hw.y - 70 * S, 8, H - 30);
+    rec.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  }
+  setInterval(placeRec, 50);
+  setInterval(() => { if (acts.has('screen:1')) renderStrip(); }, 1000); // el "hace X s" corre
+  api.onScreen((s) => {
+    window.capriScreenOn = !!s.on && !s.paused;
+    if (!s.on) { acts.delete('screen:1'); rec.classList.remove('show'); renderStrip(); return; }
+    const prev = acts.get('screen:1') || {};
+    acts.set('screen:1', { src: 'screen', at: s.at || prev.at || 0, app: s.app != null ? s.app : prev.app, paused: !!s.paused });
+    rec.classList.add('show');
+    rec.classList.toggle('paused', !!s.paused);
+    recTxt.textContent = s.paused ? 'PAUSA' : 'REC';
+    renderStrip(); placeRec(); placeStrip();
+  });
+  api.onScreenComment((t) => { if (pet.mode !== 'hidden') say(t, 4, { queue: true, badge: '● EN VIVO' }); });
   api.onStatus((s) => {
     const k = s.src + ':' + s.key;
     if (s.done) {

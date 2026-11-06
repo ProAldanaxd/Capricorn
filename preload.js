@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('capri', {
   claudeReset: (target) => ipcRenderer.invoke('claude-reset', target),
   // lo mismo con la app de Antigravity
   agSend: (text, images) => ipcRenderer.invoke('ag-send', text, images || []),
+  // y con Gemini en el navegador (Opera GX)
+  gemSend: (text, images) => ipcRenderer.invoke('gem-send', text, images || []),
   // ¿hay una imagen recién copiada (Win+Shift+S)? -> milisegundos desde que se copió, o null
   recentImage: () => ipcRenderer.invoke('recent-image'),
   // avisos de Claude Code (permisos, preguntas, botones): ver hooks.js
@@ -29,6 +31,12 @@ contextBridge.exposeInMainWorld('capri', {
   promptAnswer: (id, value) => ipcRenderer.send('prompt-answer', id, value),
   // lo que están haciendo Claude Code / Antigravity (línea debajo de Capri)
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
+  // "Ver pantalla": estado ({on, at, app, paused}) y comentarios de lo que vio
+  onScreen: (cb) => ipcRenderer.on('screen', (_e, s) => cb(s)),
+  onScreenComment: (cb) => ipcRenderer.on('screen-comment', (_e, t) => cb(t)),
+  // "Grabar pantalla": avisar que empieza (main da permiso del stream) y que termina
+  recStart: (kind) => ipcRenderer.invoke('rec-start', kind || 'grabar'), // 'captura' = una sola foto
+  recStop: (info) => ipcRenderer.send('rec-stop', info || ''),
   onNotify:(cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
   // IA (Gemini): la clave y las llamadas viven en el proceso principal
   ai: {

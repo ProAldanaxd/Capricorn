@@ -63,6 +63,36 @@ En el globo: **SYNC** = Gemini, **OLLAMA** = IA local, **LOCAL** = reglas y fras
 resultados de las herramientas que use. En el plan gratuito de AI Studio, Google puede usar esos datos para
 mejorar sus productos.
 
+### Ver pantalla 🔴
+
+Clic derecho → **Pantalla** → **Ver pantalla**. Mientras está encendido:
+
+- Junto a su cabeza sale **● REC** parpadeando, y abajo la línea *VIENDO · Opera · hace 4 s*.
+- **Lo que le preguntes** va con una foto de tu pantalla en ese momento: *"¿qué ves?"*,
+  *"¿qué significa este error?"*. Sus respuestas llevan la etiqueta **● EN VIVO**.
+- **Comenta sola** de vez en cuando (cada 3 min como mínimo, y solo si la pantalla cambió).
+  Si no ve nada interesante, se queda callada.
+- Se **pausa en juegos** (el REC se pone gris) y siempre **arranca apagado** al abrir Capri.
+
+Cómo funciona: cada ~15 s toma una foto de la pantalla principal **en memoria** (1280 px,
+~100 KB en JPG), la compara con la anterior y la tira; **no guarda archivos**. Solo le pasa fotos
+a la IA cuando le preguntas algo o cuando va a comentar.
+
+**Quién ve** (API Keys → Qué hace cada IA → *Ver pantalla*):
+
+| Opción | Qué pasa |
+|---|---|
+| **Gemini** (por defecto) | Entiende muy bien la pantalla. Las fotos van a Google: lo que haya en pantalla (mensajes, correos, datos) se manda en ellas. Necesita su API key |
+| **Ollama (local)** | **Las fotos no salen de tu compu.** Entiende menos y es más lento. Necesita Ollama encendido y un modelo con visión |
+
+Para Ollama descarga un modelo que vea, por ejemplo `ollama pull qwen3.5:2b` (cabe en una
+tarjeta de 4 GB) o `ollama pull qwen3-vl:4b` (entiende mejor, más lento). Capri detecta solos
+los modelos con visión que tengas; se elige en API Keys → Configurar Ollama → *Modelo para ver
+pantalla*. Mientras ve con Ollama contesta sin herramientas (no abre apps ni busca en internet).
+
+Con *Ver pantalla* encendido, tus preguntas las contesta quien ve aunque la *Plática* esté en
+"Ninguna". Los comentarios espontáneos respetan lo que tengas en *Comentarios espontáneos*.
+
 ### Ejecutar comandos 🔒
 
 La IA puede **proponer** comandos de PowerShell, pero viene bloqueado: pon `"desbloquearComandos": true` en
@@ -113,6 +143,27 @@ le da Enter por ti.
   las 10 más recientes; la que elijas recibe lo que mandes en CAPRI CODE.
 - Capri solo presiona teclas si la ventana del frente es Claude; si no, te avisa.
 
+### Pasarle cosas a Gemini (navegador)
+
+Igual, pero con **Gemini en tu navegador** (Opera GX, con tu cuenta de Google ya abierta):
+
+| Cómo | Qué hace |
+|---|---|
+| **Tab** hasta `CAPRI://` en **azul** (antes de `CAPRI AG://`) | Lo que escribas va a Gemini |
+| `@gemini …`, `@gem …`, `dile a Gemini que…` | Lo mismo sin cambiar de modo |
+| `nuevo` en ese modo, o clic derecho → **Gemini (navegador)** → *Chat nuevo* | La próxima vez abre un chat nuevo |
+
+- El primer mensaje abre una **ventana nueva de Opera** con un chat nuevo, pega tu texto (e
+  imágenes, si adjuntaste) y le da Enter. Capri lee la dirección del chat
+  (`gemini.google.com/app/…`) y **sigue en ese mismo chat** hasta que pidas uno nuevo o la cierres.
+- Los siguientes mensajes van a esa misma ventana. Si la cerraste o te fuiste a otra página en
+  ella, Capri abre el chat guardado en una ventana nueva.
+- **Ventanas** minimiza solo esa ventana de Opera, no las demás.
+- Los chats viejos viven en tu cuenta de Google, así que no se pueden elegir desde el menú.
+- Si Opera GX está en otro lugar, pon su ruta en `navegadorGemini` en `config.json`.
+- No tiene permisos, preguntas ni la línea de "qué está haciendo": esas salen de los hooks de
+  Claude Code y Antigravity, y una página web no tiene hooks.
+
 ### Pasarle cosas a Antigravity
 
 Igual que con Claude, pero con la app de escritorio de **Antigravity**:
@@ -154,6 +205,39 @@ mensaje (o solas):
 - Las imágenes se guardan un momento en la carpeta temporal de Windows y se borran solas.
 - Lo de "captura reciente" usa el vigilante de apps (`reaccionarAApps`): solo detecta *que* se
   copió una imagen, no la lee hasta que le das clic.
+
+### Tomar captura
+
+**Ctrl+Alt+S** (o clic derecho → *Pantalla* → *Tomar captura…*): arrastra para elegir la sección (clic o
+**Enter** = toda la pantalla, **Esc** = cancelar) y la captura queda **adjunta en su cuadro de
+texto**, lista para mandársela a Claude o a Antigravity con tu pregunta.
+
+- Va a resolución completa y en PNG, para que el texto se lea nítido. Capri no sale en ella.
+- Si el cuadro ya estaba abierto con otras imágenes, la captura se suma (hasta 4).
+- No se guarda en ningún lado (para guardar una en *Imágenes › Capri*, escríbele `toma una captura`).
+- El atajo se cambia con `atajoCaptura` en `config.json`.
+
+### Grabar pantalla
+
+Para enseñarle a Claude o a Antigravity algo que pasa en movimiento (un bug, unos pasos):
+
+1. **Ctrl+Alt+R** (o clic derecho → *Pantalla* → *Grabar pantalla…*).
+2. **Arrastra** para elegir la sección que quieres grabar. Clic sin arrastrar o **Enter** = toda la
+   pantalla; **Esc** = cancelar.
+3. Mientras graba, junto a Capri sale **■ 0:12 · clic para detener**. Detén con ese botón o con
+   **Ctrl+Alt+R** otra vez (se detiene sola a los 2 minutos).
+4. Se abre el cuadro con la grabación adjunta: escribe tu pregunta, elige a quién con Tab y Enter.
+
+Graba con un stream de la pantalla a 1-2 cuadros por segundo (como compartir pantalla en una
+llamada), que dibuja la tarjeta de video: casi no gasta CPU y no traba la pantalla.
+Claude y Antigravity no reciben video, así que Capri toma un cuadro por segundo, se queda con los
+momentos en que **algo cambió** y los acomoda en **una sola imagen** (hasta 9 cuadros en orden,
+cada uno con su tiempo). Si la pantalla no cambió, manda un solo cuadro.
+
+- Todo vive en memoria; no se guarda ningún video ni archivo (solo el momento de pegarlo).
+- Mientras graba o tiene *Ver pantalla* encendido, Windows **excluye la ventana de Capri de las
+  capturas**: tú la ves normal, pero no sale en las fotos (tampoco en otras capturas que tomes).
+- No necesita ninguna IA. El atajo se cambia con `atajoGrabar` en `config.json`.
 
 ### Permisos y preguntas de Claude Code
 
@@ -225,6 +309,11 @@ Edita [`config.json`](config.json) y reinicia Capri:
 | `ollama` | Si Ollama arranca activado la primera vez (luego manda el menú) |
 | `modeloOllama` | Modelo local (por defecto `llama3.2:3b`) |
 | `segundosEntreComentariosOllama` | Mínimo de segundos entre comentarios con Ollama (por defecto 60) |
+| `modeloVisionOllama` | Modelo de Ollama para ver la pantalla la primera vez (por defecto `qwen3.5:2b`; luego manda el menú) |
+| `atajoCaptura` | Atajo para tomar una captura y adjuntarla a su cuadro (por defecto `Ctrl+Alt+S`) |
+| `atajoGrabar` | Atajo para grabar pantalla (por defecto `Ctrl+Alt+R`) |
+| `segundosEntreComentariosPantalla` | Mínimo de segundos entre comentarios de "Ver pantalla" (por defecto 180) |
+| `navegadorGemini` | Ruta de `opera.exe` para el modo Gemini (vacío = Opera GX en su lugar de siempre) |
 | `claudeDarEnter` | `false` para que Capri solo deje el texto escrito en Claude, sin enviarlo |
 | `carpetaClaudeCode` | Carpeta del proyecto para las sesiones de Claude Code (vacío = la de la app) |
 
@@ -287,6 +376,10 @@ powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloque
 ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
 claude.js        Le pasa texto a la app de Claude (chat o Claude Code) y le da Enter.
 antigravity.js   Lo mismo con la app de Antigravity (por sus botones, vía accesibilidad).
+gemini.js        Lo mismo con Gemini en Opera GX (su propia ventana, sigue en el mismo chat).
+screen.js        "Ver pantalla": fotos de la pantalla en memoria para la IA.
+recorder.js      "Grabar pantalla": una foto por segundo de la sección elegida.
+recording.js     Elegir la sección, botón de detener y la hoja de cuadros.
 images.js        Imágenes pegadas en el cuadro: las guarda un momento y las pega en Claude/Antigravity.
 hooks.js         Recibe permisos, preguntas y botones de Claude Code (servidor local).
 hooks/           capri-hook.js: el script que corre Claude Code y le pasa todo a Capri.

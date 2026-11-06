@@ -29,7 +29,7 @@ const CMD_LOG = () => path.join(DATA(), 'comandos.log');
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const OLLAMA = 'http://127.0.0.1:11434';
 const PROVIDERS = ['gemini', 'ollama'];
-const JOBS = ['comentarios', 'platica', 'herramientas'];
+const JOBS = ['comentarios', 'platica', 'herramientas', 'vision']; // vision = quién "ve" en Ver pantalla
 
 // ---------------------------------------------------------------- clave de Gemini (cifrada)
 function hasKey() { return fs.existsSync(KEY_FILE()); }
@@ -72,7 +72,9 @@ function loadState(config) {
   const def = {
     ollama: config.ollama !== false,
     modeloOllama: config.modeloOllama || 'llama3.2:3b',
-    routes: { comentarios: config.rutaComentarios || 'ollama', platica: config.rutaPlatica || 'gemini', herramientas: config.rutaHerramientas || 'gemini' },
+    modeloVision: config.modeloVisionOllama || 'qwen3.5:2b', // modelo de Ollama que entiende imágenes
+    routes: { comentarios: config.rutaComentarios || 'ollama', platica: config.rutaPlatica || 'gemini', herramientas: config.rutaHerramientas || 'gemini',
+      vision: config.rutaVision || 'gemini' },
   };
   let s = {};
   try { s = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')); } catch { /* primera vez */ }
@@ -81,6 +83,7 @@ function loadState(config) {
   if (!s.routes && s.enabled === false) { st.routes.platica = 'none'; st.routes.herramientas = 'none'; }
   delete st.enabled;
   for (const j of JOBS) if (![...PROVIDERS, 'none'].includes(st.routes[j])) st.routes[j] = def.routes[j];
+  if (st.routes.vision === 'none') st.routes.vision = 'gemini'; // para ver siempre hace falta alguien
   return st;
 }
 function saveState(s) { try { fs.mkdirSync(DATA(), { recursive: true }); fs.writeFileSync(STATE_FILE(), JSON.stringify(s, null, 2)); } catch { /* sin permisos */ } }
@@ -271,7 +274,9 @@ async function geminiPost(body, key, signal, config) {
 async function geminiAgent({ system, messages, tools, maxTokens = 1500, timeoutMs = 45000 }, env) {
   const key = await getKey();
   if (!key) return { ok: false, error: 'nokey' };
-  const contents = messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
+  // m.image: foto de la pantalla (base64 JPEG) que va junto con ese mensaje
+  const contents = messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user',
+    parts: m.image ? [{ inlineData: { mimeType: 'image/jpeg', data: m.image } }, { text: m.text }] : [{ text: m.text }] }));
   const body = (c) => ({ systemInstruction: { parts: [{ text: system }] }, contents: c, generationConfig: { temperature: 0.95, maxOutputTokens: maxTokens },
     ...(tools && tools.length ? { tools: [{ functionDeclarations: tools }] } : {}) });
   const texts = [];
@@ -334,6 +339,18 @@ async function ollamaUp() {
 async function ollamaModels() {
   try { const r = await fetch(OLLAMA + '/api/tags', { signal: AbortSignal.timeout(4000) }); return ((await r.json()).models || []).map((m) => m.name); } catch { return []; }
 }
+// de esos, los que entienden imágenes (Ollama los marca con la capacidad "vision")
+async function ollamaVisionModels(names) {
+  const out = [];
+  for (const name of names || []) {
+    try {
+      const r = await fetch(OLLAMA + '/api/show', { method: 'POST', body: JSON.stringify({ model: name }), signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      if ((j.capabilities || []).includes('vision')) out.push(name);
+    } catch { /* ese no contestó */ }
+  }
+  return out;
+}
 async function startOllama() {
   if (await ollamaUp()) return true;
   try {
@@ -356,8 +373,9 @@ async function unloadOllama(model) {
   try { await fetch(OLLAMA + '/api/generate', { method: 'POST', body: JSON.stringify({ model, keep_alive: 0 }), signal: AbortSignal.timeout(3000) }); } catch { /* no estaba */ }
 }
 
-async function ollamaAgent({ system, messages, tools, maxTokens = 220, timeoutMs = 45000 }, env) {
-  const msgs = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.text }))];
+// model: otro modelo en lugar del de siempre (p. ej. el de visión) · m.image: foto que va con ese mensaje
+async function ollamaAgent({ system, messages, tools, maxTokens = 220, timeoutMs = 45000, model }, env) {
+  const msgs = [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.text, ...(m.image ? { images: [m.image] } : {}) }))];
   const otools = (tools || []).map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
   const texts = [];
   const deadline = Date.now() + timeoutMs;
@@ -365,7 +383,7 @@ async function ollamaAgent({ system, messages, tools, maxTokens = 220, timeoutMs
     for (let step = 0; step < 5; step++) {
       const r = await fetch(OLLAMA + '/api/chat', {
         method: 'POST', signal: AbortSignal.timeout(Math.max(2000, deadline - Date.now())),
-        body: JSON.stringify({ model: env.state.modeloOllama, messages: msgs, stream: false, keep_alive: '5m',
+        body: JSON.stringify({ model: model || env.state.modeloOllama, messages: msgs, stream: false, keep_alive: '5m',
           options: { temperature: 0.9, num_predict: maxTokens }, ...(otools.length ? { tools: otools } : {}) }),
       });
       if (!r.ok) return { ok: false, error: r.status === 404 ? 'nomodel' : 'api', status: r.status };
@@ -435,19 +453,40 @@ async function execute(p, instruction, env) {
 
 // Plática: lo que le escribes
 async function chat(text, ctx, env) {
-  const { platica, herramientas } = env.state.routes;
+  const { herramientas } = env.state.routes;
+  let { platica } = env.state.routes;
   const toolsUp = (p) => p !== 'none' && env.available(p) && !isDown(p);
+  // viendo la pantalla con Gemini: contesta Gemini aunque la plática esté en otra IA o en "Ninguna"
+  if (env.screen && env.state.routes.vision !== 'ollama') {
+    if (env.available('gemini') && !isDown('gemini')) platica = 'gemini';
+    else env = { ...env, screen: null };
+  }
   // sin plática pero con herramientas: el ejecutor hace la tarea y responde corto
-  if (platica === 'none') {
+  if (platica === 'none' && !(env.screen && env.state.routes.vision === 'ollama')) {
     if (!toolsUp(herramientas)) return { ok: false, error: 'off' };
     const r = await runAgent(herramientas, { system: EXECUTOR_PROMPT.replace('(sin personalidad, otra parte lo dirá con estilo)', '(con un toque amistoso)'),
       messages: [{ role: 'user', text }], tools: COMPUTER_TOOLS, maxTokens: 600 }, env);
     return r;
   }
-  const list = candidates(platica, env);
+  // viendo la pantalla con Ollama: contesta el modelo de visión local (la foto no sale de tu compu)
+  if (env.screen && env.state.routes.vision === 'ollama') {
+    if (env.visionModel && env.available('ollama') && !isDown('ollama')) {
+      const r = await runAgent('ollama', {
+        system: systemPrompt(env.config) + SCREEN_NOTE + '\n\n--- CONTEXTO ACTUAL ---\n' + contextText(ctx),
+        messages: [...talk, { role: 'user', text, image: env.screen }], tools: [], maxTokens: 260, timeoutMs: 90000, model: env.visionModel,
+      }, env);
+      if (r.ok) { pushTalk('user', text); pushTalk('assistant', r.text); return { ...r, screen: true }; }
+    }
+    env = { ...env, screen: null }; // no se pudo ver: plática normal, sin mandar la foto a nadie
+    if (platica === 'none') return { ok: false, error: 'unavailable' };
+  }
+  let list = candidates(platica, env);
+  // viendo la pantalla con Gemini: Gemini primero (los modelos de texto de Ollama no ven imágenes)
+  if (env.screen && list.includes('gemini')) list = ['gemini', ...list.filter((x) => x !== 'gemini')];
   if (!list.length) return { ok: false, error: 'unavailable' };
   let last;
   for (const p of list) {
+    const sees = !!env.screen && p === 'gemini';
     // quién hace las herramientas: el elegido; si no está disponible, el mismo de la plática
     let h = herramientas;
     if (h !== 'none' && !toolsUp(h)) h = p;
@@ -455,17 +494,38 @@ async function chat(text, ctx, env) {
     const web = p === 'gemini';
     const tools = [...PERSONAL_TOOLS, ...(web ? [WEB_TOOL] : []), ...(mode === 'direct' ? COMPUTER_TOOLS : mode === 'delegate' ? [DELEGATE_TOOL] : [])];
     last = await runAgent(p, {
-      system: systemPrompt(env.config, { computer: mode, web, personal: true }) + '\n\n--- CONTEXTO ACTUAL ---\n' + contextText(ctx),
-      messages: [...talk, { role: 'user', text }], tools, maxTokens: p === 'gemini' ? 1500 : 260,
+      system: systemPrompt(env.config, { computer: mode, web, personal: true }) + (sees ? SCREEN_NOTE : '') + '\n\n--- CONTEXTO ACTUAL ---\n' + contextText(ctx),
+      messages: [...talk, { role: 'user', text, ...(sees ? { image: env.screen } : {}) }], tools, maxTokens: p === 'gemini' ? 1500 : 260,
     }, { ...env, delegate: mode === 'delegate' ? (instr) => execute(h, instr, env) : null });
-    if (last.ok) { pushTalk('user', text); pushTalk('assistant', last.text); return last; }
+    // la plática guarda solo el texto (las fotos no se acumulan)
+    if (last.ok) { pushTalk('user', text); pushTalk('assistant', last.text); return { ...last, screen: sees }; }
   }
   return last;
+}
+
+// ---- "Ver pantalla"
+const SCREEN_NOTE = '\n\nAHORA MISMO ESTÁS VIENDO LA PANTALLA DEL USUARIO: la imagen adjunta es lo que tiene enfrente en este momento ' +
+  '(tú eres la chica rosa que flota encima, ignórate). Si te pregunta algo de lo que ve, contéstale viendo la imagen. ' +
+  'Nunca leas en voz alta contraseñas, datos de tarjetas ni datos privados que aparezcan.';
+
+// Comentario espontáneo de lo que hay en pantalla (solo Gemini). Si no hay nada que valga la pena: { ok:false, error:'nada' }
+async function screenComment(image, ctx, env) {
+  const p = env.state.routes.vision === 'ollama' ? 'ollama' : 'gemini';
+  if (!env.available(p) || isDown(p) || (p === 'ollama' && !env.visionModel)) return { ok: false, error: 'unavailable' };
+  const r = await runAgent(p, {
+    system: systemPrompt(env.config) + SCREEN_NOTE + '\n\n--- CONTEXTO ACTUAL ---\n' + contextText(ctx),
+    messages: [{ role: 'user', image, text: '[Esta es mi pantalla ahora, no te escribí nada.] Si ves algo útil o curioso que valga la pena ' +
+      'comentar (un error, algo que estoy haciendo, algo gracioso), dímelo en UNA frase corta y natural. Si no hay nada interesante, ' +
+      'responde exactamente: NADA' }],
+    tools: [], maxTokens: p === 'gemini' ? 600 : 120, timeoutMs: p === 'gemini' ? 20000 : 90000, ...(p === 'ollama' ? { model: env.visionModel } : {}),
+  }, env);
+  if (r.ok && /^\W*nada\W*$/i.test(r.text)) return { ok: false, error: 'nada' };
+  return r;
 }
 
 function status() { return { down: { gemini: isDown('gemini'), ollama: isDown('ollama') } }; }
 
 module.exports = {
   PROVIDERS, JOBS, hasKey, setKey, loadState, saveState, ensureMemoryFile, readMemory, resetChat,
-  event, chat, status, ollamaUp, ollamaModels, startOllama, stopOllama, unloadOllama,
+  event, chat, screenComment, status, ollamaUp, ollamaModels, ollamaVisionModels, startOllama, stopOllama, unloadOllama,
 };
