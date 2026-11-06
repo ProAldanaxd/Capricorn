@@ -9,6 +9,7 @@ const powers = require('./powers');
 const ai = require('./ai');
 const claude = require('./claude');
 const antigravity = require('./antigravity');
+const hooks = require('./hooks');
 
 // ---------- configuración (config.json, editable a mano) ----------
 const DEFAULT_CONFIG = {
@@ -225,6 +226,8 @@ function menuTemplate() {
     },
     { type: 'separator' },
     { label: 'Salir', click: () => app.quit() },
+    // cierra y vuelve a abrir Capri (sirve para cargar cambios del código o de config.json)
+    { label: 'Reiniciar', click: () => { app.relaunch(); app.quit(); } },
   ]);
 }
 
@@ -440,6 +443,22 @@ ipcMain.on('state', (_e, s) => {
 app.whenReady().then(() => {
   aiState = ai.loadState(config);
   createWindow();
+  // permisos, preguntas y botones de Claude Code -> Capri (ver hooks.js)
+  hooks.start({
+    userData: app.getPath('userData'),
+    getWin: () => win,
+    isClaudeFront: () => !!(env.app && env.app.id === 'claude'),
+    sessionTitle: (cli) => { const s = claude.sessionByCli(cli); return s ? s.title : ''; },
+    onReply: async (cli, label) => {
+      const s = claude.sessionByCli(cli);
+      if (!s) { send('hook-reply:nosession'); return; }
+      const r = await claude.sendToSession(s.id, label, config, { minimize: !!aiState.ventanas });
+      send('hook-reply:' + (r.ok ? r.result : 'error'));
+    },
+    log: (m) => claude.log('[hooks] ' + m),
+  });
+  ipcMain.on('prompt-answer', (_e, id, value) => hooks.answer(id, value));
+  app.on('before-quit', () => hooks.stop());
   tray = new Tray(trayIcon());
   tray.setToolTip('Capri');
   tray.setContextMenu(buildMenu());

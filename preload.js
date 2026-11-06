@@ -20,7 +20,11 @@ contextBridge.exposeInMainWorld('capri', {
   claudeReset: (target) => ipcRenderer.invoke('claude-reset', target),
   // lo mismo con la app de Antigravity
   agSend: (text) => ipcRenderer.invoke('ag-send', text),
-  onNotify: (cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
+  // avisos de Claude Code (permisos, preguntas, botones): ver hooks.js
+  onPrompt: (cb) => ipcRenderer.on('prompt', (_e, p) => cb(p)),
+  onPromptClose: (cb) => ipcRenderer.on('prompt-close', (_e, id) => cb(id)),
+  promptAnswer: (id, value) => ipcRenderer.send('prompt-answer', id, value),
+  onNotify:(cb) => ipcRenderer.on('notify', (_e, kind, data) => cb(kind, data)),
   // IA (Gemini): la clave y las llamadas viven en el proceso principal
   ai: {
     ask: (kind, text, ctx) => ipcRenderer.invoke('ai-ask', kind, text, ctx),

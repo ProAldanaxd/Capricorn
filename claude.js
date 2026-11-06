@@ -66,7 +66,7 @@ function listCodeSessions(limit = 10) {
     try {
       const j = JSON.parse(fs.readFileSync(f, 'utf8'));
       if (!j.sessionId || j.isArchived) continue;
-      all.push({ id: j.sessionId, title: String(j.title || 'Sin título'), cwd: String(j.cwd || ''),
+      all.push({ id: j.sessionId, cli: String(j.cliSessionId || ''), title: String(j.title || 'Sin título'), cwd: String(j.cwd || ''),
         last: j.lastActivityAt || j.createdAt || 0, created: j.createdAt || 0 });
     } catch { /* archivo a medio escribir */ }
   }
@@ -241,6 +241,25 @@ function reset(target) {
 // Elegir una sesión de Claude Code existente para lo que sigue
 function pickCodeSession(id, title) { convo.code = id; codeTitle = title || ''; }
 function current() { return { chat: convo.chat, code: convo.code, codeTitle }; }
+// La sesión de la app que corresponde al id que usan los hooks de Claude Code (session_id)
+function sessionByCli(cliId) {
+  if (!cliId) return null;
+  return listCodeSessions(0).find((s) => s.cli === cliId) || null;
+}
+
+// Mandarle un texto a una sesión concreta de Claude Code (los botones de respuesta que
+// Capri copia de Claude). No cambia la conversación que tengas elegida en CAPRI CODE.
+async function sendToSession(id, text, config, opts = {}) {
+  const q = String(text || '').trim().slice(0, MAX);
+  if (!q || !id) return { ok: false, error: 'empty' };
+  if (process.env.CAPRI_CLAUDE_DRY) { console.log('[claude dry] responder', id, JSON.stringify(q)); return { ok: true, result: 'dry' }; }
+  const warm = await isRunning();
+  try { await shell.openExternal('claude://code/continue?session=' + encodeURIComponent(id)); }
+  catch (e) { return { ok: false, error: 'open', detail: String(e && e.message || e) }; }
+  log(`responder ${id} (${q.length} letras)`);
+  const result = await withClipboard(q, () => focusAndType({ timeout: warm ? 12 : 40, settle: warm ? 2200 : 5000, keys: 'paste', enter: true, minimize: !!opts.minimize, pull: false }));
+  return { ok: result !== 'error', result };
+}
 
 // send() pero sin tronar: cualquier error se registra y se responde como 'error'
 async function safeSend(...args) {
@@ -248,4 +267,4 @@ async function safeSend(...args) {
   catch (e) { log('error: ' + String(e && e.stack || e).slice(0, 400)); return { ok: true, result: 'error' }; }
 }
 
-module.exports = { withClipboard, log, send, safeSend, reset, pickCodeSession, current, listCodeSessions, buildNewUrl };
+module.exports = { withClipboard, log, send, safeSend, reset, pickCodeSession, current, listCodeSessions, buildNewUrl, sessionByCli, sendToSession };

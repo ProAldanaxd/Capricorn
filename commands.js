@@ -59,7 +59,7 @@
     boxHint.textContent = isKey ? 'Pégala y Enter · se guarda cifrada · vacío = borrar · Esc cancela' : 'Enter para enviar · Esc para cerrar';
     input.type = isKey ? 'password' : 'text';
     box.classList.remove('to-claude', 'to-ag');
-    if (!isKey) setDest('capri');
+    if (!isKey) setDest(dest); // el modo se queda hasta que lo cambies con Tab o cierres a Capri
     open = true;
     box.classList.add('show');
     input.value = '';
@@ -552,6 +552,11 @@
       if (c.startsWith('__hover:')) { // pasar el mouse por un renglón (abre su submenú)
         const it = [...document.querySelectorAll('.cm-item')].reverse().find((e) => e.textContent.includes(c.slice(8)));
         if (it) it.dispatchEvent(new MouseEvent('mouseenter')); return;
+      }
+      if (c.startsWith('__prompt:')) { window.capriTestPrompt(c.slice(9)); return; } // panel de avisos de Claude
+      if (c.startsWith('__pclick:')) { // clic en un botón del panel de avisos
+        const it = [...document.querySelectorAll('.cp-btn')].find((e) => e.textContent.includes(c.slice(9)));
+        if (it) it.click(); return;
       }
       if (c === '__menu0') { api.showMenu({ following, sleeping: pet.mode === 'sleep', scale: S, moving: movementOn }, Math.round(pet.x - 120), Math.round(baseY() - 420)); return; }
       if (c === '__menu') {

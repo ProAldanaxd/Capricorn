@@ -135,6 +135,24 @@ Igual que con Claude, pero con la app de escritorio de **Antigravity**:
 - `carpetaClaudeCode` fija la carpeta del proyecto para Claude Code (vacío = la que elija la app).
 - Si Claude estaba cerrada espera unos segundos más a que cargue antes del Enter.
 
+### Permisos y preguntas de Claude Code
+
+Cuando Claude Code te pide **permiso** para usar una herramienta, te hace una **pregunta** con
+opciones o te deja **botones de respuesta** (como "Sí, hazlo"), Capri te lo enseña con botones:
+
+- **Permisos:** Permitir (solo esa vez), Negar o En Claude (que salga la ventanita normal).
+- **Preguntas:** picas la opción (o varias y "Listo"). Para escribir otra respuesta, En Claude.
+- **Botones de respuesta:** Capri le manda ese texto a la sesión, igual que si lo escribieras.
+- Si no contestas en ~100 s, o si estás viendo Claude en ese momento, todo sigue en Claude como siempre.
+- Capri **nunca** aprueba nada sola: solo pasa tu clic.
+
+Funciona con hooks de Claude Code en `%USERPROFILE%\.claude\settings.json` (`PermissionRequest` y
+`PreToolUse` de `AskUserQuestion` y `mcp__ccd_turn__wrap_up`), que corren
+[`hooks/capri-hook.js`](hooks/capri-hook.js). Ese script habla con Capri por un servidor local
+(solo `127.0.0.1`, con un token en `%APPDATA%\capricorn\hooks.json`). Si Capri está cerrada no hace
+nada. Para quitarlo, borra la sección `"hooks"` de ese `settings.json`
+(hay una copia de antes en `settings.json.antes-de-capri.bak`). Lo que pasa queda en `claude.log`.
+
 ### Acciones bloqueadas
 
 Estas existen pero vienen **bloqueadas**. Para usarlas pon `"desbloquearAccionesPeligrosas": true`
@@ -231,6 +249,9 @@ powers.js        Las acciones (abrir, música, buscar, capturas, ordenar, bloque
 ai.js            IA: clave cifrada, personalidad, herramientas, memoria y comandos con confirmación.
 claude.js        Le pasa texto a la app de Claude (chat o Claude Code) y le da Enter.
 antigravity.js   Lo mismo con la app de Antigravity (por sus botones, vía accesibilidad).
+hooks.js         Recibe permisos, preguntas y botones de Claude Code (servidor local).
+hooks/           capri-hook.js: el script que corre Claude Code y le pasa todo a Capri.
+prompts.js       El panel con botones para contestarle a Claude Code desde Capri.
 config.json      Ciudad y opciones.
 index.html       Página que carga todo.
 assets/
